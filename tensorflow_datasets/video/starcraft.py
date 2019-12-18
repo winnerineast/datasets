@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,33 +19,59 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from absl import logging
 import tensorflow as tf
 
-from tensorflow_datasets.core import api_utils
 import tensorflow_datasets.public_api as tfds
 
 DATA_URL_DIR = "https://storage.googleapis.com/scv_dataset/data/"
+_CITATION = """\
+@article{DBLP:journals/corr/abs-1812-01717,
+  author    = {Thomas Unterthiner and
+               Sjoerd van Steenkiste and
+               Karol Kurach and
+               Rapha{\"{e}}l Marinier and
+               Marcin Michalski and
+               Sylvain Gelly},
+  title     = {Towards Accurate Generative Models of Video: {A} New Metric and
+               Challenges},
+  journal   = {CoRR},
+  volume    = {abs/1812.01717},
+  year      = {2018},
+  url       = {http://arxiv.org/abs/1812.01717},
+  archivePrefix = {arXiv},
+  eprint    = {1812.01717},
+  timestamp = {Tue, 01 Jan 2019 15:01:25 +0100},
+  biburl    = {https://dblp.org/rec/bib/journals/corr/abs-1812-01717},
+  bibsource = {dblp computer science bibliography, https://dblp.org}
+}
+"""
 
 
 class StarcraftVideoConfig(tfds.core.BuilderConfig):
+  """Config for StarcraftVideo dataset."""
 
-  @api_utils.disallow_positional_args
+  @tfds.core.disallow_positional_args
   def __init__(self, map_name, resolution, size_in_gb, **kwargs):
-    super(StarcraftVideoConfig, self).__init__(**kwargs)
+    super(StarcraftVideoConfig, self).__init__(
+        version=tfds.core.Version(
+            "0.1.2", experiments={tfds.core.Experiment.S3: False}),
+        supported_versions=[tfds.core.Version(
+            "1.0.0", "New split API (https://tensorflow.org/datasets/splits)")],
+        **kwargs)
     self.map_name = map_name
     self.resolution = resolution
     self.size_in_gb = size_in_gb
 
 
 class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
-  """Abstract class Starcraft video datasets."""
+  """Starcraft video datasets."""
 
   BUILDER_CONFIGS = [
       StarcraftVideoConfig(
           name="brawl_64",
           description="Brawl map with 64x64 resolution.",
           map_name="Brawl",
-          version="0.1.0",
           resolution=64,
           size_in_gb=6.3,
       ),
@@ -53,7 +79,6 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
           name="brawl_128",
           description="Brawl map with 128x128 resolution.",
           map_name="Brawl",
-          version="0.1.0",
           resolution=128,
           size_in_gb=20.7,
       ),
@@ -61,7 +86,6 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
           name="collect_mineral_shards_64",
           description="CollectMineralShards map with 64x64 resolution.",
           map_name="CollectMineralShards",
-          version="0.1.0",
           resolution=64,
           size_in_gb=6.3,
       ),
@@ -69,7 +93,6 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
           name="collect_mineral_shards_128",
           description="CollectMineralShards map with 128x128 resolution.",
           map_name="CollectMineralShards",
-          version="0.1.0",
           resolution=128,
           size_in_gb=20.7,
       ),
@@ -77,7 +100,6 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
           name="move_unit_to_border_64",
           description="MoveUnitToBorder map with 64x64 resolution.",
           map_name="MoveUnitToBorder",
-          version="0.1.0",
           resolution=64,
           size_in_gb=5.8,
       ),
@@ -85,23 +107,20 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
           name="move_unit_to_border_128",
           description="MoveUnitToBorder map with 128x128 resolution.",
           map_name="MoveUnitToBorder",
-          version="0.1.0",
           resolution=128,
           size_in_gb=20.7,
       ),
       StarcraftVideoConfig(
-          name="road_trip_with_medevac_64",
-          description="RoadTripWithMedevac map with 64x64 resolution.",
-          map_name="RoadTripWithMedevac",
-          version="0.1.0",
+          name="road_trip_with_medivac_64",
+          description="RoadTripWithMedivac map with 64x64 resolution.",
+          map_name="RoadTripWithMedivac",
           resolution=64,
           size_in_gb=2.4,
       ),
       StarcraftVideoConfig(
-          name="road_trip_with_medevac_128",
-          description="RoadTripWithMedevac map with 128x128 resolution.",
-          map_name="RoadTripWithMedevac",
-          version="0.1.0",
+          name="road_trip_with_medivac_128",
+          description="RoadTripWithMedivac map with 128x128 resolution.",
+          map_name="RoadTripWithMedivac",
           resolution=128,
           size_in_gb=7.9,
       ),
@@ -118,10 +137,8 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
         builder=self,
         description="This data set contains videos generated from Starcraft.",
         features=features,
-        urls=["https://storage.googleapis.com/scv_dataset/README.html"],
-        size_in_bytes=self.builder_config.size_in_gb * tfds.units.GiB,
-        citation=("Towards Accurate Generative Models of Video: "
-                  "New Metrics & Challenges"),
+        homepage="https://storage.googleapis.com/scv_dataset/README.html",
+        citation=_CITATION,
     )
 
   def _split_generators(self, dl_manager):
@@ -168,17 +185,17 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
       dict with all frames, positions and actions.
     """
     context_features = {
-        "game_duration_loops": tf.FixedLenFeature([1], tf.int64),
-        "game_duration_seconds": tf.FixedLenFeature([1], tf.float32),
-        "n_steps": tf.FixedLenFeature([1], tf.int64),
-        "screen_size": tf.FixedLenFeature([2], tf.int64),
+        "game_duration_loops": tf.io.FixedLenFeature([1], tf.int64),
+        "game_duration_seconds": tf.io.FixedLenFeature([1], tf.float32),
+        "n_steps": tf.io.FixedLenFeature([1], tf.int64),
+        "screen_size": tf.io.FixedLenFeature([2], tf.int64),
     }
 
     sequence_features = {
-        "rgb_screen": tf.FixedLenSequenceFeature([], tf.string),
+        "rgb_screen": tf.io.FixedLenSequenceFeature([], tf.string),
     }
 
-    _, seq_feat = tf.parse_single_sequence_example(
+    _, seq_feat = tf.io.parse_single_sequence_example(
         example_proto,
         context_features=context_features,
         sequence_features=sequence_features)
@@ -188,19 +205,21 @@ class StarcraftVideo(tfds.core.GeneratorBasedBuilder):
     return video_frames
 
   def _generate_examples(self, files):
-    tf.logging.info("Reading data from %s.", ",".join(files))
+    logging.info("Reading data from %s.", ",".join(files))
     with tf.Graph().as_default():
-      ds = tf.data.TFRecordDataset(files)
+      ds = tf.data.TFRecordDataset(sorted(files))
       ds = ds.map(
           self._parse_single_video,
           num_parallel_calls=tf.data.experimental.AUTOTUNE)
-      iterator = ds.make_one_shot_iterator().get_next()
-      with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+      iterator = tf.compat.v1.data.make_one_shot_iterator(ds).get_next()
+      with tf.compat.v1.Session() as sess:
+        sess.run(tf.compat.v1.global_variables_initializer())
         try:
+          i = 0
           while True:
             video = sess.run(iterator)
-            yield self.info.features.encode_example({"rgb_screen": video})
+            yield i, {"rgb_screen": video}
+            i += 1
 
         except tf.errors.OutOfRangeError:
           # End of file.

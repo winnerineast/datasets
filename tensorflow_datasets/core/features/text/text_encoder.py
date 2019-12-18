@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import abc
 import hashlib
@@ -30,15 +31,22 @@ import tensorflow as tf
 from tensorflow_datasets.core.utils import py_utils
 
 
-ALPHANUM_REGEX = re.compile(r"\W+", flags=re.UNICODE)
-ALL_REGEX = re.compile(r"(\W+)", flags=re.UNICODE)
+def _re_compile(pattern):
+  return re.compile(pattern, flags=re.UNICODE)
+
+
 NUM_BYTES = 2**8
+ALPHANUM_REGEX = _re_compile(r"\W+")
+ALL_REGEX = _re_compile(r"(\W+)")
+
+
 
 
 class TextEncoderConfig(object):
   """Configuration for `tfds.features.Text`."""
 
-  def __init__(self, encoder=None, encoder_cls=None, vocab_size=None):
+  def __init__(self, encoder=None, encoder_cls=None, vocab_size=None,
+               name=None):
     if encoder:
       if (encoder_cls or vocab_size):
         raise ValueError("If encoder is provided, encoder_cls and "
@@ -52,6 +60,7 @@ class TextEncoderConfig(object):
     self.encoder = encoder
     self.encoder_cls = encoder_cls
     self.vocab_size = vocab_size
+    self.name = name
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -105,6 +114,9 @@ class TextEncoder(object):
   def _read_lines_from_file(cls, filename):
     return read_lines_from_file(cls.__name__, filename)
 
+  def __repr__(self):
+    return "<%s vocab_size=%d>" % (type(self).__name__, self.vocab_size)
+
 
 class ByteTextEncoder(TextEncoder):
   """Byte-encodes text."""
@@ -147,7 +159,41 @@ class ByteTextEncoder(TextEncoder):
 
   def decode(self, ids):
     ids = pad_decr(ids)
-    return tf.compat.as_text(bytes(bytearray(ids)))
+    if not self.additional_tokens:
+      return tf.compat.as_text(bytes(bytearray(ids)))
+
+    # Handle additional tokens
+    # First pass picks out the additional tokens
+    tmp_decoded = []
+    for byte_id in ids:
+      is_additional_token = byte_id < len(self.additional_tokens)
+      if is_additional_token:
+        tmp_decoded.append(self.additional_tokens[byte_id])
+      else:
+        # Leave these as ints so that we can contiguously decode bytes
+        # afterwards
+        tmp_decoded.append(byte_id - len(self.additional_tokens))
+
+    # Second pass to decode contiguous bytes
+    strs = []
+    i = 0
+    while i < len(tmp_decoded):
+      el = tmp_decoded[i]
+      if isinstance(el, six.string_types):
+        strs.append(el)
+        i += 1
+      else:
+        # Decode contiguous bytes
+        byte_ids = []
+        while i < len(tmp_decoded):
+          b = tmp_decoded[i]
+          if isinstance(b, int):
+            byte_ids.append(b)
+            i += 1
+          else:
+            break
+        strs.append(bytes(bytearray(byte_ids)).decode("utf-8", "replace"))
+    return "".join(strs)
 
   @property
   def vocab_size(self):
@@ -182,9 +228,11 @@ class TokenTextEncoder(TextEncoder):
   def __init__(self,
                vocab_list,
                oov_buckets=1,
-               oov_token=u"UNK",
+               oov_token="UNK",
                lowercase=False,
-               tokenizer=None):
+               tokenizer=None,
+               strip_vocab=True,
+               decode_token_separator=" "):
     """Constructs a TokenTextEncoder.
 
     To load from a file saved with `TokenTextEncoder.save_to_file`, use
@@ -198,8 +246,14 @@ class TokenTextEncoder(TextEncoder):
       lowercase: `bool`, whether to make all text and tokens lowercase.
       tokenizer: `Tokenizer`, responsible for converting incoming text into a
         list of tokens.
+      strip_vocab: `bool`, whether to strip whitespace from the beginning and
+        end of elements of `vocab_list`.
+      decode_token_separator: `str`, the string used to separate tokens when
+        decoding.
     """
-    self._vocab_list = [tf.compat.as_text(el).strip() for el in vocab_list]
+    self._vocab_list = [tf.compat.as_text(el) for el in vocab_list]
+    if strip_vocab:
+      self._vocab_list = [el.strip() for el in self._vocab_list]
     self._lowercase = lowercase
     if self._lowercase:
       self._vocab_list = [t.lower() for t in self._vocab_list]
@@ -214,6 +268,8 @@ class TokenTextEncoder(TextEncoder):
     reserved_tokens = [t for t in self._vocab_list if is_mixed_alphanum(t)]
     self._tokenizer = (tokenizer or Tokenizer(reserved_tokens=reserved_tokens))
     self._user_defined_tokenizer = tokenizer
+
+    self._decode_token_separator = decode_token_separator
 
   def encode(self, s):
     s = tf.compat.as_text(s)
@@ -240,7 +296,7 @@ class TokenTextEncoder(TextEncoder):
         tokens.append(self._vocab_list[int_id])
       else:
         tokens.append(self._oov_token)
-    return u" ".join(tokens)
+    return self._decode_token_separator.join(tokens)
 
   @property
   def vocab_size(self):
@@ -284,16 +340,16 @@ class TokenTextEncoder(TextEncoder):
     }
     if self._user_defined_tokenizer is not None:
       self._tokenizer.save_to_file(filename)
-      kwargs["tokenizer_file_prefix"] = filename
+      kwargs["has_tokenizer"] = True
     self._write_lines_to_file(filename, self._vocab_list, kwargs)
 
   @classmethod
   def load_from_file(cls, filename_prefix):
     filename = cls._filename(filename_prefix)
     vocab_lines, kwargs = cls._read_lines_from_file(filename)
-    tokenizer_file = kwargs.pop("tokenizer_file_prefix", None)
-    if tokenizer_file:
-      kwargs["tokenizer"] = Tokenizer.load_from_file(tokenizer_file)
+    has_tokenizer = kwargs.pop("has_tokenizer", False)
+    if has_tokenizer:
+      kwargs["tokenizer"] = Tokenizer.load_from_file(filename)
     return cls(vocab_list=vocab_lines, **kwargs)
 
 
@@ -313,13 +369,12 @@ class Tokenizer(object):
         all alphanumeric or all non-alphanumeric).
       reserved_tokens: `list<str>`, a list of strings that, if any are in `s`,
         will be preserved as whole tokens, even if they contain mixed
-        alphnumeric/non-alphanumeric characters.
+        alphanumeric/non-alphanumeric characters.
     """
     self._alphanum_only = alphanum_only
     reserved_tokens, self._reserved_tokens_re = _prepare_reserved_tokens(
         reserved_tokens)
     self._reserved_tokens = set(reserved_tokens)
-    self._alphanum_re = ALPHANUM_REGEX if self._alphanum_only else ALL_REGEX
 
   @property
   def alphanum_only(self):
@@ -343,8 +398,10 @@ class Tokenizer(object):
     for substr in substrs:
       if substr in self.reserved_tokens:
         toks.append(substr)
+      elif self._alphanum_only:
+        toks.extend(ALPHANUM_REGEX.split(substr))
       else:
-        toks.extend(self._alphanum_re.split(substr))
+        toks.extend(ALL_REGEX.split(substr))
 
     # Filter out empty strings
     toks = [t for t in toks if t]
@@ -353,10 +410,10 @@ class Tokenizer(object):
   def join(self, tokens):
     """Joins tokens into a string."""
     if self._alphanum_only:
-      return u" ".join(tokens)
+      return " ".join(tokens)
     else:
       # Fully invertible
-      return u"".join(tokens)
+      return "".join(tokens)
 
   @classmethod
   def _filename(cls, filename_prefix):
@@ -379,6 +436,10 @@ class Tokenizer(object):
 
 def pad_decr(ids):
   """Strip ID 0 and decrement ids by 1."""
+  if len(ids) < 1:
+    return list(ids)
+  if not any(ids):
+    return []  # all padding.
   idx = -1
   while not ids[idx]:
     idx -= 1
@@ -400,12 +461,24 @@ def _prepare_reserved_tokens(reserved_tokens):
   dups = _find_duplicates(reserved_tokens)
   if dups:
     raise ValueError("Duplicates found in tokens: %s" % dups)
-  reserved_tokens_re = None
-  if reserved_tokens:
-    escaped = [rt.replace(u"\\", u"\\\\") for rt in reserved_tokens]
-    pattern = u"(%s)" % u"|".join(escaped)
-    reserved_tokens_re = re.compile(pattern, flags=re.UNICODE)
+  reserved_tokens_re = _make_reserved_tokens_re(reserved_tokens)
   return reserved_tokens, reserved_tokens_re
+
+
+def _re_escape(s):
+  """Escape regex control characters."""
+  escaped = re.sub(r"[(){}\[\].*?|^$\\+-]", r"\\\g<0>", s)
+  return escaped
+
+
+def _make_reserved_tokens_re(reserved_tokens):
+  """Constructs compiled regex to parse out reserved tokens."""
+  if not reserved_tokens:
+    return None
+  escaped_tokens = [_re_escape(rt) for rt in reserved_tokens]
+  pattern = "(%s)" % "|".join(escaped_tokens)
+  reserved_tokens_re = _re_compile(pattern)
+  return reserved_tokens_re
 
 
 def _find_duplicates(els):
@@ -430,23 +503,23 @@ _METADATA_PREFIX = "### Metadata: "
 def write_lines_to_file(cls_name, filename, lines, metadata_dict):
   """Writes lines to file prepended by header and metadata."""
   metadata_dict = metadata_dict or {}
-  header_line = u"%s%s" % (_HEADER_PREFIX, cls_name)
-  metadata_line = u"%s%s" % (_METADATA_PREFIX,
-                             json.dumps(metadata_dict, sort_keys=True))
-  with tf.gfile.Open(filename, "wb") as f:
+  header_line = "%s%s" % (_HEADER_PREFIX, cls_name)
+  metadata_line = "%s%s" % (_METADATA_PREFIX,
+                            json.dumps(metadata_dict, sort_keys=True))
+  with tf.io.gfile.GFile(filename, "wb") as f:
     for line in [header_line, metadata_line]:
       f.write(tf.compat.as_bytes(line))
-      f.write(tf.compat.as_bytes(u"\n"))
+      f.write(tf.compat.as_bytes("\n"))
     if lines:
-      f.write(tf.compat.as_bytes(u"\n".join(lines)))
-      f.write(tf.compat.as_bytes(u"\n"))
+      f.write(tf.compat.as_bytes("\n".join(lines)))
+      f.write(tf.compat.as_bytes("\n"))
 
 
 def read_lines_from_file(cls_name, filename):
   """Read lines from file, parsing out header and metadata."""
-  with tf.gfile.Open(filename, "rb") as f:
+  with tf.io.gfile.GFile(filename, "rb") as f:
     lines = [tf.compat.as_text(line)[:-1] for line in f]
-  header_line = u"%s%s" % (_HEADER_PREFIX, cls_name)
+  header_line = "%s%s" % (_HEADER_PREFIX, cls_name)
   if lines[0] != header_line:
     raise ValueError("File {fname} does not seem to have been created from "
                      "{name}.save_to_file.".format(

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,10 +26,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from absl import app
+from absl import flags
 import numpy as np
 import tensorflow as tf
 
-flags = tf.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("output_file", None, "Path to the output file.")
@@ -39,7 +40,7 @@ def main(argv):
   if len(argv) > 1:
     raise tf.app.UsageError("Too many command-line arguments.")
 
-  writer = tf.python_io.TFRecordWriter(FLAGS.output_file)
+  writer = tf.io.TFRecordWriter(FLAGS.output_file)
 
   feature = {}
 
@@ -58,4 +59,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-  tf.app.run(main)
+  app.run(main)

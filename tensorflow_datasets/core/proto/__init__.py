@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,8 +14,15 @@
 # limitations under the License.
 
 """Public API of the proto package."""
+# pylint: disable=g-import-not-at-top
 
-# pylint: disable=reimported,g-bad-import-order
-from tensorflow_datasets.core.proto import dataset_info_generated_pb2 as dataset_info_pb2
-from tensorflow_datasets.core.proto.dataset_info_generated_pb2 import SplitInfo
-# pylint: enable=reimported,g-bad-import-order
+
+def _get():
+  from tensorflow_datasets.core.proto import dataset_info_generated_pb2 as dataset_info_pb2_
+  from tensorflow_datasets.core.proto.dataset_info_generated_pb2 import SplitInfo as SplitInfo_
+  from google.protobuf import json_format as json_format_
+  return dataset_info_pb2_, SplitInfo_, json_format_
+
+
+dataset_info_pb2, SplitInfo, json_format = _get()  # pylint: disable=invalid-name
+del _get

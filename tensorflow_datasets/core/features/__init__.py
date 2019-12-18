@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,30 +13,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public tfds.features API."""
+"""`tfds.features.FeatureConnector` API defining feature types."""
 
 from tensorflow_datasets.core.features import text
 
+from tensorflow_datasets.core.features.audio_feature import Audio
+from tensorflow_datasets.core.features.bounding_boxes import BBox
+from tensorflow_datasets.core.features.bounding_boxes import BBoxFeature
 from tensorflow_datasets.core.features.class_label_feature import ClassLabel
 from tensorflow_datasets.core.features.feature import FeatureConnector
-from tensorflow_datasets.core.features.feature import FeaturesDict
-from tensorflow_datasets.core.features.feature import OneOf
 from tensorflow_datasets.core.features.feature import Tensor
 from tensorflow_datasets.core.features.feature import TensorInfo
+from tensorflow_datasets.core.features.features_dict import FeaturesDict
 from tensorflow_datasets.core.features.image_feature import Image
-from tensorflow_datasets.core.features.sequence_feature import SequenceDict
+from tensorflow_datasets.core.features.sequence_feature import Sequence
 from tensorflow_datasets.core.features.text_feature import Text
+from tensorflow_datasets.core.features.translation_feature import Translation
+from tensorflow_datasets.core.features.translation_feature import TranslationVariableLanguages
 from tensorflow_datasets.core.features.video_feature import Video
 
 __all__ = [
     "text",
+    "Audio",
+    "BBox",
+    "BBoxFeature",
     "ClassLabel",
     "FeatureConnector",
     "FeaturesDict",
-    "OneOf",
     "Tensor",
     "TensorInfo",
-    "SequenceDict",
+    "Sequence",
     "Image",
     "Text",
     "Video",

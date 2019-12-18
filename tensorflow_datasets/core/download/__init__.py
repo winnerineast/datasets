@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,14 +13,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public API of the download manager."""
+"""`tfds.download.DownloadManager` API."""
 
-from tensorflow_datasets.core.download.checksums_file import load as load_checksums
+from tensorflow_datasets.core.download.checksums import add_checksums_dir
+from tensorflow_datasets.core.download.download_manager import DownloadConfig
 from tensorflow_datasets.core.download.download_manager import DownloadManager
+from tensorflow_datasets.core.download.downloader import DownloadError
+from tensorflow_datasets.core.download.extractor import iter_archive
+from tensorflow_datasets.core.download.resource import ExtractMethod
+from tensorflow_datasets.core.download.resource import Resource
+from tensorflow_datasets.core.download.util import ComputeStatsMode
 from tensorflow_datasets.core.download.util import GenerateMode
 
 __all__ = [
+    "add_checksums_dir",
+    "DownloadConfig",
     "DownloadManager",
+    "DownloadError",
+    "ComputeStatsMode",
     "GenerateMode",
-    "load_checksums",
+    "Resource",
+    "ExtractMethod",
+    "iter_archive",
 ]

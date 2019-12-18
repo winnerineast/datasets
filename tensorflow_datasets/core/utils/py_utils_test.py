@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,11 +19,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
+import hashlib
+import os
+from tensorflow_datasets import testing
+from tensorflow_datasets.core import constants
 from tensorflow_datasets.core.utils import py_utils
 
 
-class PyUtilsTest(tf.test.TestCase):
+class PyUtilsTest(testing.TestCase):
+
+  def test_is_notebook(self):
+    self.assertFalse(py_utils.is_notebook())
 
   def test_map_nested(self):
     """Test the mapping function."""
@@ -118,9 +124,95 @@ class PyUtilsTest(tf.test.TestCase):
         },
     })
 
+  def test_flatten_nest_dict(self):
+
+    nest_d = {
+        'a': 1,
+        'b/c': 2,
+        'b': {
+            'e': 3,
+            'f': {
+                'g': 4
+            },
+        },
+    }
+    flat_d = {
+        'a': 1,
+        'b/c': 2,
+        'b/e': 3,
+        'b/f/g': 4,
+    }
+
+    self.assertEqual(py_utils.flatten_nest_dict(nest_d), flat_d)
+    self.assertEqual(py_utils.pack_as_nest_dict(flat_d, nest_d), nest_d)
+
+    with self.assertRaisesWithPredicateMatch(ValueError, 'Extra keys'):
+      py_utils.pack_as_nest_dict({
+          'a': 1,
+          'b/c': 2,
+          'b/e': 3,
+          'b/f/g': 4,
+          'b/h': 5,  # Extra key
+      }, nest_d)
+
+    with self.assertRaisesWithPredicateMatch(KeyError, 'b/e'):
+      py_utils.pack_as_nest_dict(
+          {
+              'a': 1,
+              'b/c': 2,
+              'b/d': 3,
+          },
+          {
+              'a': 1,
+              'b': {
+                  'c': 2,
+                  'd': 3,
+                  'e': 4,  # Extra key
+              }
+          },
+      )
+
+    with self.assertRaisesWithPredicateMatch(
+        ValueError, 'overwrite existing key:'):
+      py_utils.flatten_nest_dict({
+          'a': {
+              'b': 1,
+          },
+          'a/b': 2,  # Collision
+      })
+
   def test_tfds_dir(self):
     """Test the proper suffix only, since the prefix can vary."""
     self.assertTrue(py_utils.tfds_dir().endswith('/tensorflow_datasets'))
 
+
+class ReadChecksumDigestTest(testing.TestCase):
+
+  def test_digest(self):
+    digest, size = py_utils.read_checksum_digest(
+        os.path.join(self.test_data, '6pixels.png'), hashlib.sha256)
+    self.assertEqual(
+        digest,
+        '04f38ebed34d3b027d2683193766155912fba647158c583c3bdb4597ad8af34c')
+    self.assertEqual(102, size)
+
+
+class GetClassPathUrlTest(testing.TestCase):
+
+  def test_get_class_path(self):
+    cls_path = py_utils.get_class_path(py_utils.NonMutableDict)
+    self.assertEqual(cls_path, 'tfds.core.utils.py_utils.NonMutableDict')
+    cls_path = py_utils.get_class_path(
+        py_utils.NonMutableDict(), use_tfds_prefix=False)
+    self.assertEqual(cls_path,
+                     'tensorflow_datasets.core.utils.py_utils.NonMutableDict')
+
+  def test_get_class_url(self):
+    cls_url = py_utils.get_class_url(py_utils.NonMutableDict)
+    self.assertEqual(
+        cls_url,
+        (constants.SRC_BASE_URL + 'tensorflow_datasets/core/utils/py_utils.py'))
+
+
 if __name__ == '__main__':
-  tf.test.main()
+  testing.test_main()

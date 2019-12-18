@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,9 +21,11 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import collections
 
+from absl import logging
 import six
 import tensorflow as tf
 
@@ -32,7 +34,7 @@ from tensorflow_datasets.core.features.text import text_encoder
 # Internally, an underscore indicates a single space, so, to ensure
 # user-supplied underscores are encoded properly, they are replaced with this
 # string during encoding.
-_UNDERSCORE_REPLACEMENT = u"\\&undsc"
+_UNDERSCORE_REPLACEMENT = "\\&undsc"
 
 
 class SubwordTextEncoder(text_encoder.TextEncoder):
@@ -70,8 +72,8 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
       vocab_list: `list<str>`, list of subwords for the vocabulary. Note that an
         underscore at the end of a subword indicates the end of the word (i.e. a
         space will be inserted afterwards when decoding). Underscores in the
-        interior are disallowed and should use the underscore escape sequence
-        "\u".
+        interior of subwords are disallowed and should use the underscore
+        escape sequence.
     """
     self._init_from_list(vocab_list)
 
@@ -89,6 +91,7 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
     """Decodes a list of integers into text."""
     ids = text_encoder.pad_decr(ids)
     subword_ids = ids
+    del ids
 
     subwords = []
 
@@ -116,11 +119,11 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
         trimmed, add_space = _trim_underscore_and_tell(subword)
         subwords.append(trimmed)
         if add_space:
-          subwords.append(u" ")
+          subwords.append(" ")
     # If there were trailing bytes, convert to unicode.
     prev_bytes = consume_prev_bytes()
 
-    return tf.compat.as_text(u"".join(subwords))
+    return tf.compat.as_text("".join(subwords))
 
   @property
   def vocab_size(self):
@@ -146,7 +149,7 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
     ids = []
     for subword in subwords:
       if subword == _UNDERSCORE_REPLACEMENT:
-        ids.append(len(self._subwords) + ord(u"_"))
+        ids.append(len(self._subwords) + ord("_"))
         continue
       subword_id = self._subword_to_id.get(subword)
       if subword_id is None:
@@ -164,8 +167,8 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
     """Encode a single token byte-wise into integer ids."""
     # Vocab ids for all bytes follow ids for the subwords
     offset = len(self._subwords)
-    if token == u"_":
-      return [len(self._subwords) + ord(u" ")]
+    if token == "_":
+      return [len(self._subwords) + ord(" ")]
     return [i + offset for i in list(bytearray(tf.compat.as_bytes(token)))]
 
   def _id_to_subword(self, subword_id):
@@ -242,7 +245,7 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
     # Wrap in single quotes to make it easier to see the full subword when
     # it has spaces and make it easier to search with ctrl+f.
     filename = self._filename(filename_prefix)
-    lines = [u"'%s'" % s for s in self._subwords]
+    lines = ["'%s'" % s for s in self._subwords]
     self._write_lines_to_file(filename, lines)
 
   @classmethod
@@ -267,7 +270,7 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
       corpus_generator: generator yielding `str`, from which subwords will be
         constructed.
       target_vocab_size: `int`, approximate size of the vocabulary to create.
-      max_subword_length: `int`, maxmimum length of a subword. Note that memory
+      max_subword_length: `int`, maximum length of a subword. Note that memory
         and compute scale quadratically in the length of the longest token.
       max_corpus_chars: `int`, the maximum number of characters to consume from
         `corpus_generator` for the purposes of building the subword vocabulary.
@@ -294,8 +297,8 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
     def _binary_search(min_token_count, max_token_count):
       """Binary search min_token_count to build SubwordTextEncoder vocab."""
       candidate_min = (min_token_count + max_token_count) // 2
-      tf.logging.info("SubwordTextEncoder build: trying min_token_count %d",
-                      candidate_min)
+      logging.info("SubwordTextEncoder build: trying min_token_count %d",
+                   candidate_min)
       encoder = cls._build_from_token_counts(
           token_counts=token_counts,
           min_token_count=candidate_min,
@@ -325,7 +328,12 @@ class SubwordTextEncoder(text_encoder.TextEncoder):
       else:
         return next_encoder
 
-    return _binary_search(1, 1000)
+    # Get min and max token counts.
+    min_token_count = max(min(token_counts.values()), 1)
+    max_token_count = max(token_counts.values())
+
+    # Another option could be to do a binary search over *ranks* of the tokens.
+    return _binary_search(min_token_count, max_token_count)
 
   @classmethod
   def _build_from_token_counts(cls, token_counts, min_token_count,
@@ -408,7 +416,7 @@ def _validate_build_arguments(max_subword_length, reserved_tokens,
         "building the vocabulary scale quadratically in the length of the "
         "longest token.")
   for t in reserved_tokens:
-    if t.endswith(u"_") or not text_encoder.is_mixed_alphanum(t):
+    if t.endswith("_") or not text_encoder.is_mixed_alphanum(t):
       raise ValueError(
           "Reserved tokens must not end with _ and they must contain a mix "
           "of alphanumeric and non-alphanumeric characters. For example, "
@@ -421,23 +429,23 @@ def _validate_build_arguments(max_subword_length, reserved_tokens,
 
 
 def _trim_underscore(token):
-  if token.endswith(u"_"):
+  if token.endswith("_"):
     return token[:-1]
   return token
 
 
 def _trim_underscore_and_tell(token):
-  if token.endswith(u"_"):
+  if token.endswith("_"):
     return token[:-1], True
   return token, False
 
 
 def _escape(s):
-  return s.replace(u"_", _UNDERSCORE_REPLACEMENT)
+  return s.replace("_", _UNDERSCORE_REPLACEMENT)
 
 
 def _unescape(s):
-  return s.replace(_UNDERSCORE_REPLACEMENT, u"_")
+  return s.replace(_UNDERSCORE_REPLACEMENT, "_")
 
 
 def _prepare_tokens_for_encode(tokens):
@@ -461,8 +469,8 @@ def _prepare_tokens_for_encode(tokens):
     t = _escape(t)
     # If next token is a single space, add _ suffix to token and skip the
     # empty space.
-    if next_t == u" ":
-      t += u"_"
+    if next_t == " ":
+      t += "_"
       skip_next = True
     return t, skip_next
 

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,19 +19,42 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import os
 
 from absl.testing import parameterized
-import tensorflow as tf
-from tensorflow_datasets.core import test_utils
+import numpy as np
+from tensorflow_datasets import testing
 from tensorflow_datasets.core.features.text import text_encoder
 
-ZH_HELLO = u'你好 '
-EN_HELLO = u'hello '
+ZH_HELLO = '你好 '
+EN_HELLO = 'hello '
 
 
-class ByteTextEncoderTest(parameterized.TestCase, tf.test.TestCase):
+class TextEncoderTest(testing.TestCase):
+
+  def test_pad_decr(self):
+    self.assertEqual([2, 1, 0], text_encoder.pad_decr([3, 2, 1]))
+    self.assertEqual([2, 1, 0], text_encoder.pad_decr([3, 2, 1, 0, 0, 0]))
+    self.assertEqual([-1, 2, 1, 0], text_encoder.pad_decr([0, 3, 2, 1, 0, 0]))
+    self.assertEqual([], text_encoder.pad_decr([]))
+    self.assertEqual([], text_encoder.pad_decr(np.array([])))
+
+  def test_pad_incr(self):
+    self.assertEqual([4, 3, 2], text_encoder.pad_incr([3, 2, 1]))
+    self.assertEqual([4, 3, 2, 1], text_encoder.pad_incr([3, 2, 1, 0]))
+
+  def test_is_mixed_alphanum(self):
+    self.assertFalse(text_encoder.is_mixed_alphanum('hi'))
+    self.assertFalse(text_encoder.is_mixed_alphanum(ZH_HELLO[:-1]))
+    self.assertTrue(text_encoder.is_mixed_alphanum('hi.'))
+    self.assertTrue(text_encoder.is_mixed_alphanum('hi.bye'))
+    self.assertTrue(text_encoder.is_mixed_alphanum('hi '))
+    self.assertTrue(text_encoder.is_mixed_alphanum(ZH_HELLO))
+
+
+class ByteTextEncoderTest(parameterized.TestCase, testing.TestCase):
   # Incremented for pad
   ZH_HELLO_IDS = [i + 1 for i in [228, 189, 160, 229, 165, 189, 32]]
   EN_HELLO_IDS = [i + 1 for i in [104, 101, 108, 108, 111, 32]]
@@ -55,8 +78,10 @@ class ByteTextEncoderTest(parameterized.TestCase, tf.test.TestCase):
     # With additional tokens
     text_additional = '%s %s%s%s' % (additional_tokens[0], ZH_HELLO,
                                      additional_tokens[1], additional_tokens[2])
-    self.assertEqual([1, 32 + 1 + len(additional_tokens)] + hello_ids + [2, 3],
+    expected_ids = [1, 32 + 1 + len(additional_tokens)] + hello_ids + [2, 3]
+    self.assertEqual(expected_ids,
                      encoder.encode(text_additional))
+    self.assertEqual(text_additional, encoder.decode(expected_ids))
     self.assertEqual(text_encoder.NUM_BYTES + 1 + len(additional_tokens),
                      encoder.vocab_size)
 
@@ -66,7 +91,7 @@ class ByteTextEncoderTest(parameterized.TestCase, tf.test.TestCase):
   )
   def test_file_backed(self, additional_tokens):
     encoder = text_encoder.ByteTextEncoder(additional_tokens=additional_tokens)
-    with test_utils.tmp_dir(self.get_temp_dir()) as tmp_dir:
+    with testing.tmp_dir(self.get_temp_dir()) as tmp_dir:
       vocab_fname = os.path.join(tmp_dir, 'vocab')
       encoder.save_to_file(vocab_fname)
 
@@ -77,18 +102,18 @@ class ByteTextEncoderTest(parameterized.TestCase, tf.test.TestCase):
                        file_backed_encoder.additional_tokens)
 
 
-class TokenTextEncoderTest(tf.test.TestCase):
+class TokenTextEncoderTest(testing.TestCase):
 
   def test_encode_decode(self):
     encoder = text_encoder.TokenTextEncoder(
-        vocab_list=[u'hi', 'bye', ZH_HELLO])
+        vocab_list=['hi', 'bye', ZH_HELLO])
     ids = [i + 1 for i in [0, 1, 2, 0]]
     self.assertEqual(ids, encoder.encode('hi  bye %s hi' % ZH_HELLO))
-    self.assertEqual(u'hi bye %shi' % ZH_HELLO, encoder.decode(ids))
+    self.assertEqual('hi bye %shi' % ZH_HELLO, encoder.decode(ids))
 
   def test_oov(self):
     encoder = text_encoder.TokenTextEncoder(
-        vocab_list=[u'hi', 'bye', ZH_HELLO],
+        vocab_list=['hi', 'bye', ZH_HELLO],
         oov_buckets=1,
         oov_token='UNK')
     ids = [i + 1 for i in [0, 3, 3, 1]]
@@ -98,7 +123,7 @@ class TokenTextEncoderTest(tf.test.TestCase):
 
   def test_multiple_oov(self):
     encoder = text_encoder.TokenTextEncoder(
-        vocab_list=[u'hi', 'bye', ZH_HELLO],
+        vocab_list=['hi', 'bye', ZH_HELLO],
         oov_buckets=2,
         oov_token='UNK')
     encoded = encoder.encode('hi boo zoo too foo bye')
@@ -110,30 +135,30 @@ class TokenTextEncoderTest(tf.test.TestCase):
     self.assertEqual('hi UNK UNK bye', encoder.decode([1, 4, 5, 2]))
 
   def test_tokenization(self):
-    encoder = text_encoder.TokenTextEncoder(vocab_list=[u'hi', 'bye', ZH_HELLO])
-    text = u'hi<<>><<>foo!^* bar && bye (%s hi)' % ZH_HELLO
-    self.assertEqual([u'hi', u'foo', u'bar', u'bye',
-                      ZH_HELLO.strip(), u'hi'],
+    encoder = text_encoder.TokenTextEncoder(vocab_list=['hi', 'bye', ZH_HELLO])
+    text = 'hi<<>><<>foo!^* bar && bye (%s hi)' % ZH_HELLO
+    self.assertEqual(['hi', 'foo', 'bar', 'bye',
+                      ZH_HELLO.strip(), 'hi'],
                      text_encoder.Tokenizer().tokenize(text))
     self.assertEqual([i + 1 for i in [0, 3, 3, 1, 2, 0]], encoder.encode(text))
 
   def test_file_backed(self):
-    with test_utils.tmp_dir(self.get_temp_dir()) as tmp_dir:
+    with testing.tmp_dir(self.get_temp_dir()) as tmp_dir:
       vocab_fname = os.path.join(tmp_dir, 'vocab')
       encoder = text_encoder.TokenTextEncoder(
-          vocab_list=[u'hi', 'bye', ZH_HELLO])
+          vocab_list=['hi', 'bye', ZH_HELLO])
       encoder.save_to_file(vocab_fname)
       file_backed_encoder = text_encoder.TokenTextEncoder.load_from_file(
           vocab_fname)
       self.assertEqual(encoder.tokens, file_backed_encoder.tokens)
 
   def test_file_backed_with_args(self):
-    with test_utils.tmp_dir(self.get_temp_dir()) as tmp_dir:
+    with testing.tmp_dir(self.get_temp_dir()) as tmp_dir:
       # Set all the args to non-default values, including Tokenizer
       tokenizer = text_encoder.Tokenizer(
           reserved_tokens=['<FOOBAR>'], alphanum_only=False)
       encoder = text_encoder.TokenTextEncoder(
-          vocab_list=[u'hi', 'bye', ZH_HELLO],
+          vocab_list=['hi', 'bye', ZH_HELLO],
           lowercase=True,
           oov_buckets=2,
           oov_token='ZOO',
@@ -155,7 +180,7 @@ class TokenTextEncoderTest(tf.test.TestCase):
 
   def test_mixedalphanum_tokens(self):
     mixed_tokens = ['<EOS>', 'zoo!', '!foo']
-    vocab_list = mixed_tokens + [u'hi', 'bye', ZH_HELLO]
+    vocab_list = mixed_tokens + ['hi', 'bye', ZH_HELLO]
 
     encoder = text_encoder.TokenTextEncoder(vocab_list=vocab_list)
 
@@ -173,7 +198,7 @@ class TokenTextEncoderTest(tf.test.TestCase):
 
   def test_lowercase(self):
     mixed_tokens = ['<EOS>', 'zoo!']
-    vocab_list = mixed_tokens + [u'hi', 'bye', ZH_HELLO]
+    vocab_list = mixed_tokens + ['hi', 'bye', ZH_HELLO]
     encoder = text_encoder.TokenTextEncoder(
         vocab_list=vocab_list, lowercase=True)
     # No mixed tokens
@@ -190,14 +215,14 @@ class TokenTextEncoderTest(tf.test.TestCase):
         return ['hi', 'bye']
 
     tokenizer = DummyTokenizer()
-    vocab_list = [u'hi', 'bye', ZH_HELLO]
+    vocab_list = ['hi', 'bye', ZH_HELLO]
     encoder = text_encoder.TokenTextEncoder(
         vocab_list=vocab_list, tokenizer=tokenizer)
     # Ensure it uses the passed tokenizer and not the default
     self.assertEqual([1, 2], encoder.encode('zoo foo'))
 
 
-class TokenizeTest(parameterized.TestCase, tf.test.TestCase):
+class TokenizeTest(parameterized.TestCase, testing.TestCase):
 
   def test_default(self):
     text = 'hi<<>><<>foo!^* bar &&  bye (%s hi)' % ZH_HELLO
@@ -237,7 +262,7 @@ class TokenizeTest(parameterized.TestCase, tf.test.TestCase):
     self.assertEqual(s, tokenizer.join(tokenizer.tokenize(s)))
 
   def test_reserved_tokens(self):
-    text = u'hello worldbar bar foozoo zoo FOO<EOS>'
+    text = 'hello worldbar bar foozoo zoo FOO<EOS>'
     tokens = ['hello', ' ', 'world', 'bar', ' ', 'bar', ' ', 'foozoo',
               ' ', 'zoo', ' ', 'FOO', '<EOS>']
     tokenizer = text_encoder.Tokenizer(alphanum_only=False,
@@ -245,6 +270,16 @@ class TokenizeTest(parameterized.TestCase, tf.test.TestCase):
     self.assertEqual(tokens, tokenizer.tokenize(text))
     self.assertEqual(text, tokenizer.join(tokenizer.tokenize(text)))
 
+  def test_reserved_tokens_with_regex_chars(self):
+    text = r'hello worldba\)r bar foozoo zoo FOO|<EOS>'
+    tokens = ['hello', ' ', 'world', r'ba\)r', ' ', 'bar', ' ', 'foozoo',
+              ' ', 'zoo', ' ', 'FOO|', '<EOS>']
+    tokenizer = text_encoder.Tokenizer(
+        alphanum_only=False,
+        reserved_tokens=['<EOS>', 'FOO|', r'ba\)r'])
+    self.assertEqual(tokens, tokenizer.tokenize(text))
+    self.assertEqual(text, tokenizer.join(tokenizer.tokenize(text)))
+
 
 if __name__ == '__main__':
-  tf.test.main()
+  testing.test_main()

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -77,18 +77,36 @@ _CITATION = """\
 }
 """
 
+_DESCRIPTION = """\
+CelebFaces Attributes Dataset (CelebA) is a large-scale face attributes dataset\
+ with more than 200K celebrity images, each with 40 attribute annotations. The \
+images in this dataset cover large pose variations and background clutter. \
+CelebA has large diversities, large quantities, and rich annotations, including\
+
+ - 10,177 number of identities,
+ - 202,599 number of face images, and
+ - 5 landmark locations, 40 binary attributes annotations per image.
+
+The dataset can be employed as the training and test sets for the following \
+computer vision tasks: face attribute recognition, face detection, and landmark\
+ (or facial part) localization.
+"""
+
 
 class CelebA(tfds.core.GeneratorBasedBuilder):
   """CelebA dataset. Aligned and cropped. With metadata."""
 
-  VERSION = tfds.core.Version("0.2.0")
+  VERSION = tfds.core.Version("0.3.0",
+                              experiments={tfds.core.Experiment.S3: False})
+  SUPPORTED_VERSIONS = [
+      tfds.core.Version(
+          "2.0.0", "New split API (https://tensorflow.org/datasets/splits)"),
+  ]
 
   def _info(self):
     return tfds.core.DatasetInfo(
         builder=self,
-        description=("Large-scale CelebFaces Attributes, CelebA."
-                     "Set of ~30k celebrities pictures. "
-                     "These pictures are cropped."),
+        description=_DESCRIPTION,
         features=tfds.features.FeaturesDict({
             "image":
                 tfds.features.Image(
@@ -99,8 +117,7 @@ class CelebA(tfds.core.GeneratorBasedBuilder):
                 name: tf.bool for name in ATTR_HEADINGS
             },
         }),
-        urls=["http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html"],
-        size_in_bytes=2 * tfds.units.GiB,
+        homepage="http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html",
         citation=_CITATION,
     )
 
@@ -149,7 +166,7 @@ class CelebA(tfds.core.GeneratorBasedBuilder):
       values: map from the file name to the list of attribute values for
               this file.
     """
-    with tf.gfile.Open(file_path) as f:
+    with tf.io.gfile.GFile(file_path) as f:
       data_raw = f.read()
     lines = data_raw.split("\n")
 
@@ -163,13 +180,14 @@ class CelebA(tfds.core.GeneratorBasedBuilder):
     return keys, values
 
   def _generate_examples(self, file_id, extracted_dirs):
+    """Yields examples."""
     filedir = os.path.join(extracted_dirs["img_align_celeba"],
                            "img_align_celeba")
     img_list_path = extracted_dirs["list_eval_partition"]
     landmarks_path = extracted_dirs["landmarks_celeba"]
     attr_path = extracted_dirs["list_attr_celeba"]
 
-    with tf.gfile.Open(img_list_path) as f:
+    with tf.io.gfile.GFile(img_list_path) as f:
       files = [
           line.split()[0]
           for line in f.readlines()
@@ -179,15 +197,17 @@ class CelebA(tfds.core.GeneratorBasedBuilder):
     attributes = self._process_celeba_config_file(attr_path)
     landmarks = self._process_celeba_config_file(landmarks_path)
 
-    for file_name in files:
+    for file_name in sorted(files):
       path = os.path.join(filedir, file_name)
 
-      yield self.info.features.encode_example({
+      record = {
           "image": path,
           "landmarks": {
               k: v for k, v in zip(landmarks[0], landmarks[1][file_name])
           },
           "attributes": {
-              k: v for k, v in zip(attributes[0], attributes[1][file_name])
+              # atributes value are either 1 or -1, so convert to bool
+              k: v > 0 for k, v in zip(attributes[0], attributes[1][file_name])
           },
-      })
+      }
+      yield file_name, record

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,15 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+from tensorflow_datasets import testing
 from tensorflow_datasets.core.utils import tf_utils
 
+tf.compat.v1.enable_eager_execution()
 
-class TfUtilsTest(tf.test.TestCase):
 
-  @tf.contrib.eager.run_test_in_graph_and_eager_modes()
+class TfUtilsTest(testing.TestCase):
+
+  @testing.run_in_graph_and_eager_modes()
   def test_graph_runner(self):
     graph_runner = tf_utils.TFGraphRunner()
 
@@ -54,4 +57,4 @@ class TfUtilsTest(tf.test.TestCase):
 
 
 if __name__ == '__main__':
-  tf.test.main()
+  testing.test_main()

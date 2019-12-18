@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,15 +18,14 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+from tensorflow_datasets import testing
 from tensorflow_datasets.image import cifar
-from tensorflow_datasets.testing import dataset_builder_testing
 
 
 # testing/cifar.py generates fake input data
 
 
-class Cifar10Test(dataset_builder_testing.TestCase):
+class Cifar10Test(testing.DatasetBuilderTestCase):
   DATASET_CLASS = cifar.Cifar10
   SPLITS = {
       "train": 10,
@@ -34,7 +33,11 @@ class Cifar10Test(dataset_builder_testing.TestCase):
   }
 
 
-class Cifar100Test(dataset_builder_testing.TestCase):
+class Cifar10TestS3(Cifar10Test):
+  VERSION = "experimental_latest"
+
+
+class Cifar100Test(testing.DatasetBuilderTestCase):
   DATASET_CLASS = cifar.Cifar100
   SPLITS = {
       "train": 10,
@@ -42,5 +45,9 @@ class Cifar100Test(dataset_builder_testing.TestCase):
   }
 
 
+class Cifar100TestS3(Cifar100Test):
+  VERSION = "experimental_latest"
+
+
 if __name__ == "__main__":
-  dataset_builder_testing.main()
+  testing.test_main()

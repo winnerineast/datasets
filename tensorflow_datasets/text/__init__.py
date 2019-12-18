@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Text-based sentiment analysis datasets."""
+"""Text datasets."""
 
+from tensorflow_datasets.text.c4 import C4
+from tensorflow_datasets.text.civil_comments import CivilComments
+from tensorflow_datasets.text.definite_pronoun_resolution import DefinitePronounResolution
+from tensorflow_datasets.text.esnli import Esnli
+from tensorflow_datasets.text.gap import Gap
+from tensorflow_datasets.text.glue import Glue
 from tensorflow_datasets.text.imdb import IMDBReviews
+from tensorflow_datasets.text.imdb import IMDBReviewsConfig
+from tensorflow_datasets.text.lm1b import Lm1b
+from tensorflow_datasets.text.lm1b import Lm1bConfig
+from tensorflow_datasets.text.math_dataset import MathDataset
+from tensorflow_datasets.text.multi_nli import MultiNLI
+from tensorflow_datasets.text.multi_nli_mismatch import MultiNLIMismatch
+from tensorflow_datasets.text.scicite import Scicite
+from tensorflow_datasets.text.snli import Snli
+from tensorflow_datasets.text.squad import Squad
+from tensorflow_datasets.text.super_glue import SuperGlue
+from tensorflow_datasets.text.trivia_qa import TriviaQA
+from tensorflow_datasets.text.wikipedia import Wikipedia
+from tensorflow_datasets.text.xnli import Xnli

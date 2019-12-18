@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -70,12 +70,9 @@ def _required_args(fn):
   if not spec.defaults:
     return []
 
-  required_args = []
   arg_names = spec.args[-len(spec.defaults):]
-  for name, val in zip(arg_names, spec.defaults):
-    if val is REQUIRED_ARG:
-      required_args.append(name)
-  return required_args
+  return [name for name, val in zip(arg_names, spec.defaults)
+          if val is REQUIRED_ARG]
 
 
 def _check_required(fn, kwargs):

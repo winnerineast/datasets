@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ from __future__ import print_function
 import itertools
 import os
 
+from absl import logging
 import tensorflow as tf
 import tensorflow_datasets.public_api as tfds
 
@@ -53,35 +54,44 @@ class ImageLabelFolder(tfds.core.GeneratorBasedBuilder):
 
   ```
   builder = tfds.image.ImageLabelFolder('<dataset_name>')
-  builder.download_and_prepare(manual_dir='path/to/manual_dir/')
-  print(ds_builder.info)  # Splits, num examples,... automatically extracted
-  ds = builder.as_dataset(split='split_name')
+  dl_config = tfds.download.DownloadConfig(manual_dir='path/to/manual_dir/')
+  builder.download_and_prepare(download_config=dl_config)
+  print(builder.info)  # Splits, num examples,... automatically extracted
+  ds = builder.as_dataset(split='split_name', shuffle_files=True)
   ```
 
   Or with load:
 
   ```
+  dl_config = tfds.download.DownloadConfig(manual_dir='path/to/manual_dir/')
   tfds.load(
       'image_label_folder',
       split='split_name'
-      builder_kwargs=dict(name='<dataset_name>'),
-      download_and_prepare_kwargs=dict(manual_dir='path/to/manual_dir/'),
+      builder_kwargs=dict(dataset_name='<dataset_name>'),
+      download_and_prepare_kwargs=dict(download_config=dl_config),
   )
   ```
 
   """
 
-  VERSION = tfds.core.Version("1.0.0")
+  MANUAL_DOWNLOAD_INSTRUCTIONS = "This is a 'template' dataset."
+
+  VERSION = tfds.core.Version("1.0.0",
+                              experiments={tfds.core.Experiment.S3: False})
+  SUPPORTED_VERSIONS = [
+      tfds.core.Version(
+          "2.0.0", "New split API (https://tensorflow.org/datasets/splits)"),
+  ]
 
   # TODO(epot): Image shape should be automatically deduced
 
-  def __init__(self, dataset_name, **kwargs):
+  def __init__(self, dataset_name="image_label_folder", **kwargs):
     self.name = dataset_name
     super(ImageLabelFolder, self).__init__(**kwargs)
 
   def _info(self):
     if not self._data_dir:
-      tf.logging.warning(
+      logging.warning(
           "ImageLabelFolder.info is only complete once the data has been "
           "generated. Please call .download_and_prepare() before calling "
           ".info. The .info.features won't be computed.")
@@ -98,7 +108,7 @@ class ImageLabelFolder(tfds.core.GeneratorBasedBuilder):
     )
 
   def _split_generators(self, dl_manager):
-
+    """Returns SplitGenerators from the folder names."""
     # At data creation time, parse the folder to deduce number of splits,
     # labels, image size,
 
@@ -155,21 +165,23 @@ class ImageLabelFolder(tfds.core.GeneratorBasedBuilder):
 
     for label, image_paths in label_images.items():
       for image_path in image_paths:
-        yield self.info.features.encode_example({
+        key = "%s/%s" % (label, os.path.basename(image_path))
+        yield key, {
             "image": image_path,
             "label": label,
-        })
+        }
 
 
 def list_folders(root_dir):
   return [
-      f for f in tf.gfile.ListDirectory(root_dir)
-      if tf.gfile.IsDirectory(os.path.join(root_dir, f))
+      f for f in tf.io.gfile.listdir(root_dir)
+      if tf.io.gfile.isdir(os.path.join(root_dir, f))
   ]
 
 
 def list_imgs(root_dir):
   return [
-      os.path.join(root_dir, f) for f in tf.gfile.ListDirectory(root_dir)
+      os.path.join(root_dir, f)
+      for f in tf.io.gfile.listdir(root_dir)
       if any(f.lower().endswith(ext) for ext in SUPPORTED_IMAGE_FORMAT)
   ]

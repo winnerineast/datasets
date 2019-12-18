@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import operator
 
 import six
 from six.moves import range  # pylint: disable=redefined-builtin
-from six.moves import zip  # pylint: disable=redefined-builtin
 
 from tensorflow_datasets.core import proto
 from tensorflow_datasets.core import utils
@@ -33,11 +32,11 @@ from tensorflow_datasets.core import utils
 
 @utils.as_proto_cls(proto.SplitInfo)
 class SplitInfo(object):
-  """Similar structure as `proto.SplitInfo` but with additional property."""
+  """Wraps `proto.SplitInfo` with an additional property."""
 
   @property
   def num_examples(self):
-    return self.statistics.num_examples
+    return int(self.statistics.num_examples)
 
   def __repr__(self):
     num_examples = self.num_examples or "unknown"
@@ -45,42 +44,49 @@ class SplitInfo(object):
 
 
 @six.add_metaclass(abc.ABCMeta)
-class _SplitDescriptorNode(object):
+class SplitBase(object):
+  # pylint: disable=line-too-long
   """Abstract base class for Split compositionality.
 
+  See the
+  [guide on splits](https://github.com/tensorflow/datasets/tree/master/docs/splits.md)
+  for more information.
+
   There are three parts to the composition:
-    1) The splits are composed (defined, merged, splitted,...) together before
-       calling the .as_dataset() function. This is done with the __add__,
-       __getitem__, which return a tree of _SplitDescriptorNode (whose leaf are
-       the NamedSplit objects)
+    1) The splits are composed (defined, merged, split,...) together before
+       calling the `.as_dataset()` function. This is done with the `__add__`,
+       `__getitem__`, which return a tree of `SplitBase` (whose leaf
+       are the `NamedSplit` objects)
 
-        split = tfds.TRAIN + tfds.TEST[:50]
+    ```
+    split = tfds.Split.TRAIN + tfds.Split.TEST.subsplit(tfds.percent[:50])
+    ```
 
-    2) The _SplitDescriptorNode is forwarded to the .as_dataset() function to be
-       resolved into actual read instruction. This is done by the
-       .get_read_instruction() method which takes the real dataset splits
+    2) The `SplitBase` is forwarded to the `.as_dataset()` function
+       to be resolved into actual read instruction. This is done by the
+       `.get_read_instruction()` method which takes the real dataset splits
        (name, number of shards,...) and parse the tree to return a
-       SplitReadInstruction() object
+       `SplitReadInstruction()` object
 
-        read_instruction = split.get_read_instruction(self.info.splits)
+    ```
+    read_instruction = split.get_read_instruction(self.info.splits)
+    ```
 
-    3) The SplitReadInstruction is then used in the tf.data.Dataset pipeline
+    3) The `SplitReadInstruction` is then used in the `tf.data.Dataset` pipeline
        to define which files to read and how to skip examples within file.
 
-        files_to_read = read_instruction.split_info_list
-        slice_per_file = read_instruction.slice_list
-
   """
+  # pylint: enable=line-too-long
 
   @abc.abstractmethod
   def get_read_instruction(self, split_dict):
     """Parse the descriptor tree and compile all read instructions together.
 
     Args:
-      split_dict: (dict) The dict[split_name, SplitInfo] of the dataset
+      split_dict: `dict`, The `dict[split_name, SplitInfo]` of the dataset
 
     Returns:
-      split_read_instruction (SplitReadInstruction)
+      split_read_instruction: `SplitReadInstruction`
     """
     raise NotImplementedError("Abstract method")
 
@@ -90,6 +96,10 @@ class _SplitDescriptorNode(object):
       return False
     raise NotImplementedError(
         "Equality is not implemented between merged/sub splits.")
+
+  def __ne__(self, other):
+    """InEquality: tfds.Split.TRAIN != 'test'."""
+    return not self.__eq__(other)
 
   def __add__(self, other):
     """Merging: tfds.Split.TRAIN + tfds.Split.TEST."""
@@ -115,7 +125,7 @@ class _SplitDescriptorNode(object):
     ```
 
     Warning: k and weighted will be converted into percent which mean that
-    values bellow the percent will be rounded up or down. The final split may be
+    values below the percent will be rounded up or down. The final split may be
     bigger to deal with remainders. For instance:
 
     ```
@@ -133,7 +143,7 @@ class _SplitDescriptorNode(object):
         split.subsplit([1, 1, 2])  # weighted=[1, 1, 2]
         ```
       k: `int` If set, subdivide the split into `k` equal parts.
-      percent: `tfds.percent slice`, return a single subplit corresponding to
+      percent: `tfds.percent slice`, return a single subsplit corresponding to
         a slice of the original split. For example:
         `split.subsplit(tfds.percent[-20:])  # Last 20% of the dataset`.
       weighted: `list[int]`, return a list of subsplits whose proportions match
@@ -205,11 +215,15 @@ class _SplitDescriptorNode(object):
       raise ValueError("Could not determine the split")
 
 
-class PercentSlice(object):
-  """Syntactic sugar to easily select subsplit using tfds.percent[75:-5]."""
+# 2 requirements:
+# 1. tfds.percent be sliceable
+# 2. tfds.percent be documented
+#
+# Instances are not documented, so we want tfds.percent to be a class, but to
+# have it be sliceable, we need this metaclass.
+class PercentSliceMeta(type):
 
-  def __getitem__(self, slice_value):
-    """tfds.percent[:-30]."""
+  def __getitem__(cls, slice_value):
     if not isinstance(slice_value, slice):
       raise ValueError(
           "tfds.percent should only be called with slice, not {}".format(
@@ -217,10 +231,23 @@ class PercentSlice(object):
     return slice_value
 
 
-percent = PercentSlice()
+@six.add_metaclass(PercentSliceMeta)
+class PercentSlice(object):
+  # pylint: disable=line-too-long
+  """Syntactic sugar for defining slice subsplits: `tfds.percent[75:-5]`.
+
+  See the
+  [guide on splits](https://github.com/tensorflow/datasets/tree/master/docs/splits.md)
+  for more information.
+  """
+  # pylint: enable=line-too-long
+  pass
 
 
-class _SplitMerged(_SplitDescriptorNode):
+percent = PercentSlice  # pylint: disable=invalid-name
+
+
+class _SplitMerged(SplitBase):
   """Represent two split descriptors merged together."""
 
   def __init__(self, split1, split2):
@@ -232,8 +259,11 @@ class _SplitMerged(_SplitDescriptorNode):
     read_instruction2 = self._split2.get_read_instruction(split_dict)
     return read_instruction1 + read_instruction2
 
+  def __repr__(self):
+    return "({!r} + {!r})".format(self._split1, self._split2)
 
-class _SubSplit(_SplitDescriptorNode):
+
+class _SubSplit(SplitBase):
   """Represent a sub split of a split descriptor."""
 
   def __init__(self, split, slice_value):
@@ -243,13 +273,27 @@ class _SubSplit(_SplitDescriptorNode):
   def get_read_instruction(self, split_dict):
     return self._split.get_read_instruction(split_dict)[self._slice_value]
 
+  def __repr__(self):
+    slice_str = "{start}:{stop}"
+    if self._slice_value.step is not None:
+      slice_str += ":{step}"
+    slice_str = slice_str.format(
+        start=
+        "" if self._slice_value.start is None else self._slice_value.start,
+        stop="" if self._slice_value.stop is None else self._slice_value.stop,
+        step=self._slice_value.step,
+    )
+    return "{!r}(tfds.percent[{}])".format(self._split, slice_str)
 
-class NamedSplit(_SplitDescriptorNode):
-  """Descriptor corresponding to a named split (train, test,...).
+
+class NamedSplit(SplitBase):
+  """Descriptor corresponding to a named split (train, test, ...).
 
   Each descriptor can be composed with other using addition or slice. Ex:
 
-    split = tfds.Split.TRAIN[0:25] + tfds.Split.TEST
+  ```
+  split = tfds.Split.TRAIN.subsplit(tfds.percent[0:25]) + tfds.Split.TEST
+  ```
 
   The resulting split will correspond to 25% of the train split merged with
   100% of the test split.
@@ -257,19 +301,33 @@ class NamedSplit(_SplitDescriptorNode):
   Warning:
     A split cannot be added twice, so the following will fail:
 
-      split = tfds.Split.TRAIN[:25] + tfds.Split.TRAIN[75:]
-      split = tfds.Split.TEST + tfds.Split.ALL
+  ```
+  split = (
+      tfds.Split.TRAIN.subsplit(tfds.percent[:25]) +
+      tfds.Split.TRAIN.subsplit(tfds.percent[75:])
+  )  # Error
+  split = tfds.Split.TEST + tfds.Split.ALL  # Error
+  ```
 
   Warning:
     The slices can be applied only one time. So the following are valid:
 
-      split = tfds.Split.TRAIN[0:25] + tfds.Split.TEST[0:50]
-      split = (tfds.Split.TRAIN + tfds.Split.TEST)[0:50]
+  ```
+  split = (
+      tfds.Split.TRAIN.subsplit(tfds.percent[:25]) +
+      tfds.Split.TEST.subsplit(tfds.percent[:50])
+  )
+  split = (tfds.Split.TRAIN + tfds.Split.TEST).subsplit(tfds.percent[:50])
+  ```
 
     But not:
 
-      split = tfds.Split.TRAIN[0:25][0:25]
-      split = (tfds.Split.TRAIN[:25] + tfds.Split.TEST)[0:50]
+  ```
+  train = tfds.Split.TRAIN
+  test = tfds.Split.TEST
+  split = train.subsplit(tfds.percent[:25]).subsplit(tfds.percent[:25])
+  split = (train.subsplit(tfds.percent[:25]) + test).subsplit(tfds.percent[:50])
+  ```
 
   """
 
@@ -280,13 +338,13 @@ class NamedSplit(_SplitDescriptorNode):
     return self._name
 
   def __repr__(self):
-    return "<tfds.core.NamedSplit name={name}>".format(name=self._name)
+    return "NamedSplit('{name}')".format(name=self._name)
 
   def __eq__(self, other):
     """Equality: tfds.Split.TRAIN == 'train'."""
     if isinstance(other, NamedSplit):
       return self._name == other._name   # pylint: disable=protected-access
-    elif isinstance(other, _SplitDescriptorNode):
+    elif isinstance(other, SplitBase):
       return False
     elif isinstance(other, six.string_types):  # Other should be string
       return self._name == other
@@ -294,14 +352,21 @@ class NamedSplit(_SplitDescriptorNode):
       raise ValueError("Equality not supported between split {} and {}".format(
           self, other))
 
+  def __hash__(self):
+    return hash(self._name)
+
   def get_read_instruction(self, split_dict):
     return SplitReadInstruction(split_dict[self._name])
 
 
 class NamedSplitAll(NamedSplit):
+  """Split corresponding to the union of all defined dataset splits."""
 
   def __init__(self):
     super(NamedSplitAll, self).__init__("all")
+
+  def __repr__(self):
+    return "NamedSplitAll()".format(name=self._name)
 
   def get_read_instruction(self, split_dict):
     # Merge all dataset split together
@@ -310,6 +375,7 @@ class NamedSplitAll(NamedSplit):
 
 
 class Split(object):
+  # pylint: disable=line-too-long
   """`Enum` for dataset splits.
 
   Datasets are typically split into different subsets to be used at various
@@ -321,14 +387,25 @@ class Split(object):
     model architecture, etc.).
   * `TEST`: the testing data. This is the data to report metrics on. Typically
     you do not want to use this during model iteration as you may overfit to it.
-  * `ALL`: Special value corresponding to all existing split of a dataset
-    merged together
+  * `ALL`: Special value, never defined by a dataset, but corresponding to all
+    defined splits of a dataset merged together.
+
+  Note: All splits, including compositions inherit from `tfds.core.SplitBase`
+
+  See the
+  [guide on splits](https://github.com/tensorflow/datasets/tree/master/docs/splits.md)
+  for more information.
   """
+  # pylint: enable=line-too-long
   TRAIN = NamedSplit("train")
   TEST = NamedSplit("test")
   VALIDATION = NamedSplit("validation")
   # All is a special Split which correspond to all split merged together
   ALL = NamedSplitAll()
+
+  def __new__(cls, name):
+    """Create a custom split with tfds.Split('custom_name')."""
+    return NamedSplit(name)
 
 
 # Similar to SplitInfo, but contain an additional slice info
@@ -341,14 +418,16 @@ SlicedSplitInfo = collections.namedtuple("SlicedSplitInfo", [
 class SplitReadInstruction(object):
   """Object containing the reading instruction for the dataset.
 
-  Similarly to SplitDescriptor nodes, this object can be composed with itself,
+  Similarly to `SplitDescriptor` nodes, this object can be composed with itself,
   but the resolution happens instantaneously, instead of keeping track of the
-  tree, such as all instuctions are compiled and flattened in a single
+  tree, such as all instructions are compiled and flattened in a single
   SplitReadInstruction object containing the list of files and slice to use.
 
   Once resolved, the instructions can be accessed with:
 
-    read_instructions.get_list_sliced_split_info()  # List of splits to use
+  ```
+  read_instructions.get_list_sliced_split_info()  # List of splits to use
+  ```
 
   """
 
@@ -370,7 +449,7 @@ class SplitReadInstruction(object):
   def __add__(self, other):
     """Merging split together."""
     # Will raise error if a split has already be added (NonMutableDict)
-    # TODO(epot): If a split is already added but there is no overlapp between
+    # TODO(epot): If a split is already added but there is no overlap between
     # the slices, should merge the slices (ex: [:10] + [80:])
     split_instruction = SplitReadInstruction()
     split_instruction._splits.update(self._splits)   # pylint: disable=protected-access
@@ -405,6 +484,44 @@ def slice_to_percent_mask(slice_value):
   return [i in selected for i in range(100)]
 
 
+def get_shard_id2num_examples(num_shards, total_num_examples):
+  """Return the mapping shard_id=>num_examples, assuming round-robin."""
+  # TODO(b/130353071): This has the strong assumption that the shards have
+  # been written in a round-robin fashion. This assumption does not hold, for
+  # instance, with Beam generation. The mapping shard_id=>num_examples
+  # should be computed during generation.
+
+  # Minimum number of example per shards
+  num_example_in_shard = total_num_examples // num_shards
+  shard_id2num_examples = [num_example_in_shard for _ in range(num_shards)]
+  # If there are remaining examples, we add them to the first shards
+  for shard_id in range(total_num_examples % num_shards):
+    shard_id2num_examples[shard_id] += 1
+  return shard_id2num_examples
+
+
+def compute_mask_offsets(shard_id2num_examples):
+  """Return the list of offsets associated with each shards.
+
+  Args:
+    shard_id2num_examples: `list[int]`, mapping shard_id=>num_examples
+
+  Returns:
+    mask_offsets: `list[int]`, offset to skip for each of the shard
+  """
+  total_num_examples = sum(shard_id2num_examples)
+
+  mask_offsets = []
+  total_num_examples = 0
+  for num_examples_in_shard in shard_id2num_examples:
+    # The offset (nb of examples to skip in the next shard) correspond to the
+    # number of examples remaining in the current shard
+    mask_offsets.append(total_num_examples % 100)
+    total_num_examples += num_examples_in_shard
+
+  return mask_offsets
+
+
 class SplitDict(utils.NonMutableDict):
   """Split info object."""
 
@@ -412,6 +529,9 @@ class SplitDict(utils.NonMutableDict):
     super(SplitDict, self).__init__(error_msg="Split {key} already present")
 
   def __getitem__(self, key):
+    if str(key) not in self:
+      raise KeyError("Invalid split %s. Available splits are: %s" % (
+          key, sorted(list(self.keys()))))
     return super(SplitDict, self).__getitem__(str(key))
 
   def __setitem__(self, key, value):
@@ -439,38 +559,46 @@ class SplitDict(utils.NonMutableDict):
     # Return the proto.SplitInfo, sorted by name
     return sorted((s.get_proto() for s in self.values()), key=lambda s: s.name)
 
+  @property
+  def total_num_examples(self):
+    """Return the total number of examples."""
+    return sum(s.num_examples for s in self.values())
+
   def copy(self):
     return SplitDict.from_proto(self.to_proto())
 
 
+def check_splits_equals(splits1, splits2):
+  """Check two split dicts have same name, shard_lengths and num_shards."""
+  if set(splits1) ^ set(splits2):  # Name intersection should be null
+    return False
+  for _, (split1, split2) in utils.zip_dict(splits1, splits2):
+    if (split1.num_shards != split2.num_shards or
+        split1.shard_lengths != split2.shard_lengths):
+      return False
+  return True
+
+
 class SplitGenerator(object):
-  """Defines the split info for the generator.
+  """Defines the split information for the generator.
 
   This should be used as returned value of
   `GeneratorBasedBuilder._split_generators`.
   See `GeneratorBasedBuilder._split_generators` for more info and example
   of usage.
-
-  Args:
-    name (str/list[str]): Name of the Split for which the generator will create
-      the examples. If a list is given, the generator examples will be
-      distributed among the splits proportionally to the num_shards
-    num_shards (int/list[int]): Number of shards between which the generated
-      examples will be written. If name is a list, then num_shards should be a
-      list with the same number of element.
-    gen_kwargs (dict): Kwargs to forward to the ._generate_examples() of the
-      generator builder
-
   """
 
   def __init__(self, name, num_shards=1, gen_kwargs=None):
+    """Constructs a `SplitGenerator`.
+
+    Args:
+      name: `str`, name of the Split for which the generator will
+        create the examples.
+      num_shards: `int`, number of shards between which the generated examples
+        will be written.
+      gen_kwargs: `dict`, kwargs to forward to the _generate_examples() method
+        of the builder.
+    """
+    self.name = name
     self.gen_kwargs = gen_kwargs or {}
-
-    if isinstance(name, list):
-      split_zip = zip(name, num_shards)
-    else:
-      split_zip = [(name, num_shards)]
-
-    self.split_info_list = [
-        SplitInfo(name=str(n), num_shards=k) for n, k in split_zip
-    ]
+    self.split_info = SplitInfo(name=str(name), num_shards=num_shards)

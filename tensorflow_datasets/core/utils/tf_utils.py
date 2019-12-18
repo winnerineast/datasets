@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+import contextlib
 
 import numpy as np
 import tensorflow as tf
@@ -50,9 +51,9 @@ class TFGraphRunner(object):
   Limitations:
    * Currently the graph runner only support function with single input
      and output. Support for more complex function could be added and should be
-     relativelly straighforward.
-   * A different graph is created for each input shape, so isn't really addapted
-     for dynamic batch size.
+     relatively straightforward.
+   * A different graph is created for each input shape, so it isn't really
+     adapted for dynamic batch size.
 
   Usage:
     graph_runner = TFGraphRunner()
@@ -99,14 +100,15 @@ class TFGraphRunner(object):
     with tf.Graph().as_default() as g:
       # Create placeholder
       input_ = run_args.input
-      placeholder = tf.placeholder(dtype=input_.dtype, shape=input_.shape)
+      placeholder = tf.compat.v1.placeholder(
+          dtype=input_.dtype, shape=input_.shape)
       output = run_args.fct(placeholder)
-      return GraphRun(
-          session=nogpu_session(),
-          graph=g,
-          placeholder=placeholder,
-          output=output,
-      )
+    return GraphRun(
+        session=raw_nogpu_session(g),
+        graph=g,
+        placeholder=placeholder,
+        output=output,
+    )
 
   def _build_signature(self, run_args):
     """Create a unique signature for each fct/inputs."""
@@ -135,7 +137,7 @@ def assert_shape_match(shape1, shape2):
 
   Args:
     shape1 (tuple): Static shape
-    shape2 (tuple): Dyncamic shape (can contains None)
+    shape2 (tuple): Dynamic shape (can contain None)
   """
   shape1 = tf.TensorShape(shape1)
   shape2 = tf.TensorShape(shape2)
@@ -146,7 +148,33 @@ def assert_shape_match(shape1, shape2):
   shape1.assert_is_compatible_with(shape2)
 
 
-def nogpu_session():
+@contextlib.contextmanager
+def nogpu_session(graph=None):
+  """tf.Session context manager, hiding GPUs."""
+  # We don't use the with construction because we don't want the Session to be
+  # installed as the "default" session.
+  sess = raw_nogpu_session(graph)
+  yield sess
+  sess.close()
+
+
+def raw_nogpu_session(graph=None):
   """tf.Session, hiding GPUs."""
-  config = tf.ConfigProto(device_count={'GPU': 0})
-  return tf.Session(config=config)
+  config = tf.compat.v1.ConfigProto(device_count={'GPU': 0})
+  return tf.compat.v1.Session(config=config, graph=graph)
+
+
+@contextlib.contextmanager
+def maybe_with_graph(graph=None, create_if_none=True):
+  """Eager-compatible Graph().as_default() yielding the graph."""
+  if tf.executing_eagerly():
+    yield None
+  else:
+    if graph is None and create_if_none:
+      graph = tf.Graph()
+
+    if graph is None:
+      yield None
+    else:
+      with graph.as_default():
+        yield graph

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,16 +22,23 @@ from __future__ import division
 from __future__ import print_function
 
 import contextlib
+import hashlib
+import io
 import itertools
 import os
 import sys
 import uuid
 
+import six
 import tensorflow as tf
-
 from tensorflow_datasets.core import constants
 
+
 # pylint: disable=g-import-not-at-top
+try:  # Use shutil on Python 3.3+
+  from shutil import disk_usage  # pylint: disable=g-importing-member
+except ImportError:
+  from psutil import disk_usage  # pylint: disable=g-importing-member
 if sys.version_info[0] > 2:
   import functools
 else:
@@ -44,9 +51,20 @@ else:
 # See
 # https://stackoverflow.com/questions/14946264/python-lru-cache-decorator-per-instance
 # For @property methods, use @memoized_property below.
-# TODO(rsepassi): Write a @memoize decorator that does the right thing for
-# instance methods.
 memoize = functools.lru_cache
+
+
+def is_notebook():
+  """Returns True if running in a notebook (Colab, Jupyter) environement."""
+  # Inspired from the tfdm autonotebook code
+  try:
+    from IPython import get_ipython  # pylint: disable=g-import-not-at-top
+    if "IPKernelApp" not in get_ipython().config:
+      return False  # Run in a IPython terminal
+  except:  # pylint: disable=bare-except
+    return False
+  else:
+    return True
 
 
 @contextlib.contextmanager
@@ -68,15 +86,15 @@ def zip_dict(*dicts):
 class NonMutableDict(dict):
   """Dict where keys can only be added but not modified.
 
-  Will raise an error if the user try to overwritte one key. The error message
+  Will raise an error if the user try to overwrite one key. The error message
   can be customized during construction. It will be formatted using {key} for
-  the overwritted key.
+  the overwritten key.
   """
 
   def __init__(self, *args, **kwargs):
     self._error_msg = kwargs.pop(
         "error_msg",
-        "Try to overwritte existing key: {key}",
+        "Try to overwrite existing key: {key}",
     )
     if kwargs:
       raise ValueError("NonMutableDict cannot be initialized with kwargs.")
@@ -117,17 +135,26 @@ class memoized_property(property):  # pylint: disable=invalid-name
     return cached
 
 
-def map_nested(function, data_struct, dict_only=False):
-  """Apply a function recursivelly to each element of a nested data struct."""
+def map_nested(function, data_struct, dict_only=False, map_tuple=False):
+  """Apply a function recursively to each element of a nested data struct."""
 
   # Could add support for more exotic data_struct, like OrderedDict
   if isinstance(data_struct, dict):
     return {
-        k: map_nested(function, v, dict_only) for k, v in data_struct.items()
+        k: map_nested(function, v, dict_only, map_tuple)
+        for k, v in data_struct.items()
     }
   elif not dict_only:
-    if isinstance(data_struct, list):
-      return [map_nested(function, v, dict_only) for v in data_struct]
+    types = [list]
+    if map_tuple:
+      types.append(tuple)
+    if isinstance(data_struct, tuple(types)):
+      mapped = [map_nested(function, v, dict_only, map_tuple)
+                for v in data_struct]
+      if isinstance(data_struct, list):
+        return mapped
+      else:
+        return tuple(mapped)
   # Singleton
   return function(data_struct)
 
@@ -150,11 +177,45 @@ def zip_nested(arg0, *args, **kwargs):
   return (arg0,) + args
 
 
+def flatten_nest_dict(d):
+  """Return the dict with all nested keys flattened joined with '/'."""
+  # Use NonMutableDict to ensure there is no collision between features keys
+  flat_dict = NonMutableDict()
+  for k, v in d.items():
+    if isinstance(v, dict):
+      flat_dict.update({
+          "{}/{}".format(k, k2): v2 for k2, v2 in flatten_nest_dict(v).items()
+      })
+    else:
+      flat_dict[k] = v
+  return flat_dict
+
+
+def pack_as_nest_dict(flat_d, nest_d):
+  """Pack a 1-lvl dict into a nested dict with same structure as `nest_d`."""
+  nest_out_d = {}
+  for k, v in nest_d.items():
+    if isinstance(v, dict):
+      v_flat = flatten_nest_dict(v)
+      sub_d = {
+          k2: flat_d.pop("{}/{}".format(k, k2)) for k2, _ in v_flat.items()
+      }
+      # Recursivelly pack the dictionary
+      nest_out_d[k] = pack_as_nest_dict(sub_d, v)
+    else:
+      nest_out_d[k] = flat_d.pop(k)
+  if flat_d:  # At the end, flat_d should be empty
+    raise ValueError(
+        "Flat dict strucure do not match the nested dict. Extra keys: "
+        "{}".format(list(flat_d.keys())))
+  return nest_out_d
+
+
 def as_proto_cls(proto_cls):
   """Simulate proto inheritance.
 
   By default, protobuf do not support direct inheritance, so this decorator
-  simulate inheriance to the class to which it is applied.
+  simulates inheritance to the class to which it is applied.
 
   Example:
 
@@ -187,10 +248,23 @@ def as_proto_cls(proto_cls):
       """Base class simulating the protobuf."""
 
       def __init__(self, *args, **kwargs):
-        self.__proto = proto_cls(*args, **kwargs)
+        super(ProtoCls, self).__setattr__(
+            "_ProtoCls__proto",
+            proto_cls(*args, **kwargs),
+        )
 
       def __getattr__(self, attr_name):
         return getattr(self.__proto, attr_name)
+
+      def __setattr__(self, attr_name, new_value):
+        try:
+          if isinstance(new_value, list):
+            self.ClearField(attr_name)
+            getattr(self.__proto, attr_name).extend(new_value)
+          else:
+            return setattr(self.__proto, attr_name, new_value)
+        except AttributeError:
+          return super(ProtoCls, self).__setattr__(attr_name, new_value)
 
       def __eq__(self, other):
         return self.__proto, other.get_proto()
@@ -202,8 +276,9 @@ def as_proto_cls(proto_cls):
         return "<{cls_name}\n{proto_repr}\n>".format(
             cls_name=cls.__name__, proto_repr=repr(self.__proto))
 
-    decorator_cls = type(cls.__name__, (cls, ProtoCls), {})
-    # Class cannot be wraped because __doc__ not overwritable with python2
+    decorator_cls = type(cls.__name__, (cls, ProtoCls), {
+        "__doc__": cls.__doc__,
+    })
     return decorator_cls
   return decorator
 
@@ -217,9 +292,9 @@ def tfds_dir():
 def atomic_write(path, mode):
   """Writes to path atomically, by writing to temp file and renaming it."""
   tmp_path = "%s%s_%s" % (path, constants.INCOMPLETE_SUFFIX, uuid.uuid4().hex)
-  with tf.gfile.Open(tmp_path, mode) as file_:
+  with tf.io.gfile.GFile(tmp_path, mode) as file_:
     yield file_
-  tf.gfile.Rename(tmp_path, path, overwrite=True)
+  tf.io.gfile.rename(tmp_path, path, overwrite=True)
 
 
 class abstractclassmethod(classmethod):  # pylint: disable=invalid-name
@@ -230,3 +305,74 @@ class abstractclassmethod(classmethod):  # pylint: disable=invalid-name
   def __init__(self, fn):
     fn.__isabstractmethod__ = True
     super(abstractclassmethod, self).__init__(fn)
+
+
+def get_tfds_path(relative_path):
+  """Returns absolute path to file given path relative to tfds root."""
+  path = os.path.join(tfds_dir(), relative_path)
+  return path
+
+
+def read_checksum_digest(path, checksum_cls=hashlib.sha256):
+  """Given a hash constructor, returns checksum digest and size of file."""
+  checksum = checksum_cls()
+  size = 0
+  with tf.io.gfile.GFile(path, "rb") as f:
+    while True:
+      block = f.read(io.DEFAULT_BUFFER_SIZE)
+      size += len(block)
+      if not block:
+        break
+      checksum.update(block)
+  return checksum.hexdigest(), size
+
+
+def reraise(prefix=None, suffix=None):
+  """Reraise an exception with an additional message."""
+  exc_type, exc_value, exc_traceback = sys.exc_info()
+  prefix = prefix or ""
+  suffix = "\n" + suffix if suffix else ""
+  msg = prefix + str(exc_value) + suffix
+  six.reraise(exc_type, exc_type(msg), exc_traceback)
+
+
+@contextlib.contextmanager
+def try_reraise(*args, **kwargs):
+  """Reraise an exception with an additional message."""
+  try:
+    yield
+  except Exception:   # pylint: disable=broad-except
+    reraise(*args, **kwargs)
+
+
+def rgetattr(obj, attr, *args):
+  """Get attr that handles dots in attr name."""
+  def _getattr(obj, attr):
+    return getattr(obj, attr, *args)
+  return functools.reduce(_getattr, [obj] + attr.split("."))
+
+
+def has_sufficient_disk_space(needed_bytes, directory="."):
+  try:
+    free_bytes = disk_usage(os.path.abspath(directory)).free
+  except OSError:
+    return True
+  return needed_bytes < free_bytes
+
+
+def get_class_path(cls, use_tfds_prefix=True):
+  """Returns path of given class or object. Eg: `tfds.image.cifar.Cifar10`."""
+  if not isinstance(cls, type):
+    cls = cls.__class__
+  module_path = cls.__module__
+  if use_tfds_prefix and module_path.startswith("tensorflow_datasets"):
+    module_path = "tfds" + module_path[len("tensorflow_datasets"):]
+  return ".".join([module_path, cls.__name__])
+
+
+def get_class_url(cls):
+  """Returns URL of given class or object."""
+  cls_path = get_class_path(cls, use_tfds_prefix=False)
+  module_path, unused_class_name = cls_path.rsplit(".", 1)
+  module_path = module_path.replace(".", "/")
+  return constants.SRC_BASE_URL + module_path + ".py"

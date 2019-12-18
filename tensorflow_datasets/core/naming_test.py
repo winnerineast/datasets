@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,16 +20,15 @@ from __future__ import division
 from __future__ import print_function
 
 from absl.testing import parameterized
-import tensorflow as tf
+from tensorflow_datasets import testing
 from tensorflow_datasets.core import naming
 from tensorflow_datasets.core import splits
 
 
-class NamingTest(parameterized.TestCase, tf.test.TestCase):
+class NamingTest(parameterized.TestCase, testing.TestCase):
 
   @parameterized.parameters(
       ("HelloWorld", "hello_world"),
-      ("FooBARBaz", "foo_bar_baz"),
       ("FooBARBaz", "foo_bar_baz"),
       ("FooBar123", "foo_bar123"),
       ("FooBar123Baz", "foo_bar123_baz"),
@@ -37,6 +36,15 @@ class NamingTest(parameterized.TestCase, tf.test.TestCase):
   )
   def test_camelcase_to_snakecase(self, camel, snake):
     self.assertEqual(snake, naming.camelcase_to_snakecase(camel))
+
+  @parameterized.parameters(
+      ("HelloWorld", "hello_world"),
+      ("FooBar123", "foo_bar123"),
+      ("FooBar123Baz", "foo_bar123_baz"),
+      ("FooBar123baz", "foo_bar123baz"),
+  )
+  def test_snake_to_camelcase(self, camel, snake):
+    self.assertEqual(naming.snake_to_camelcase(snake), camel)
 
   def test_sharded_filenames(self):
     prefix = "/tmp/foo"
@@ -94,4 +102,4 @@ class NamingTest(parameterized.TestCase, tf.test.TestCase):
 
 
 if __name__ == "__main__":
-  tf.test.main()
+  testing.test_main()

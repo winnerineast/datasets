@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,12 +18,11 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
-import tensorflow as tf
+from tensorflow_datasets import testing
 from tensorflow_datasets.core import api_utils
 
 
-class ApiUtilsTest(tf.test.TestCase):
+class ApiUtilsTest(testing.TestCase):
 
   def test_disallow_positional_args(self):
 
@@ -79,4 +78,4 @@ class ApiUtilsTest(tf.test.TestCase):
 
 
 if __name__ == "__main__":
-  tf.test.main()
+  testing.test_main()

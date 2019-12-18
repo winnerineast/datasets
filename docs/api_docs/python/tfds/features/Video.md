@@ -2,10 +2,13 @@
 <meta itemprop="name" content="tfds.features.Video" />
 <meta itemprop="path" content="Stable" />
 <meta itemprop="property" content="dtype"/>
-<meta itemprop="property" content="serialized_keys"/>
+<meta itemprop="property" content="feature"/>
 <meta itemprop="property" content="shape"/>
+<meta itemprop="property" content="__getitem__"/>
 <meta itemprop="property" content="__init__"/>
+<meta itemprop="property" content="decode_batch_example"/>
 <meta itemprop="property" content="decode_example"/>
+<meta itemprop="property" content="decode_ragged_example"/>
 <meta itemprop="property" content="encode_example"/>
 <meta itemprop="property" content="get_serialized_info"/>
 <meta itemprop="property" content="get_tensor_info"/>
@@ -15,46 +18,100 @@
 
 # tfds.features.Video
 
+<!-- Insert buttons and diff -->
+
+<table class="tfo-notebook-buttons tfo-api" align="left">
+</table>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/video_feature.py">View
+source</a>
+
 ## Class `Video`
 
-Inherits From: [`Tensor`](../../tfds/features/Tensor.md)
+`FeatureConnector` for videos, encoding frames individually on disk.
 
+Inherits From: [`Sequence`](../../tfds/features/Sequence.md)
 
+<!-- Placeholder for "Used in" -->
 
-Defined in [`core/features/video_feature.py`](https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/video_feature.py).
+Video: The image connector accepts as input a 4 dimensional `tf.uint8` array
+representing a video, a sequence of paths to encoded frames, or a path or a file
+object that can be decoded with ffmpeg. Note that not all formats in ffmpeg
+support reading from pipes, so providing a file object might fail. Furthermore,
+if a path is given that is not on the local file system, we first copy it to a
+temporary local file before passing it to ffmpeg.
 
-Feature which encode/decode a video.
+#### Output:
 
-Video: The image connector accepts as input:
-  * uint8 array representing an video.
+*   <b>`video`</b>: tf.Tensor of type `tf.uint8` and shape [num_frames, height,
+    width, channels], where channels must be 1 or 3
 
-Output:
-  video: tf.Tensor of type tf.uint8 and shape [num_frames, height, width, 3]
+#### Example:
 
-Example:
-  * In the DatasetInfo object:
-    features=features.FeatureDict({
-        'video': features.Video(shape=(None, 64, 64, 3)),
-    })
+*   In the DatasetInfo object:
 
-  * During generation:
-    yield self.info.features.encode_example({
-        'input': np.ones(shape=(128, 64, 64, 3), dtype=np.uint8),
-    })
+```
+features=features.FeatureDict({
+    'video': features.Video(shape=(None, 64, 64, 3)),
+})
+```
+
+*   During generation, you can use any of:
+
+```
+yield {
+    'video': np.ones(shape=(128, 64, 64, 3), dtype=np.uint8),
+}
+```
+
+or list of frames:
+
+```
+yield {
+    'video': ['path/to/frame001.png', 'path/to/frame002.png'],
+}
+```
+
+or path to video:
+
+```
+yield {
+    'video': '/path/to/video.avi',
+}
+```
+
+or file object:
+
+```
+yield {
+    'video': tf.io.gfile.GFile('/complex/path/video.avi'),
+}
+```
 
 <h2 id="__init__"><code>__init__</code></h2>
 
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/video_feature.py">View
+source</a>
+
 ``` python
-__init__(shape)
+__init__(
+    shape,
+    encoding_format='png',
+    ffmpeg_extra_args=()
+)
 ```
 
-Construct the connector.
+Initializes the connector.
 
 #### Args:
 
-* <b>`shape`</b>: tuple of ints, the shape of the video (num_frames, height, width,
-    channels=3).
-
+*   <b>`shape`</b>: tuple of ints, the shape of the video (num_frames, height,
+    width, channels), where channels is 1 or 3.
+*   <b>`encoding_format`</b>: The video is stored as a sequence of encoded
+    images. You can use any encoding format supported by image_feature.Feature.
+*   <b>`ffmpeg_extra_args`</b>: A sequence of additional args to be passed to
+    the ffmpeg binary. Specifically, ffmpeg will be called as: `ffmpeg -i
+    <input_file> <ffmpeg_extra_args> %010d.<encoding_format>`
 
 #### Raises:
 
@@ -68,70 +125,131 @@ Construct the connector.
 
 Return the dtype (or dict of dtype) of this FeatureConnector.
 
-<h3 id="serialized_keys"><code>serialized_keys</code></h3>
+<h3 id="feature"><code>feature</code></h3>
 
-List of the flattened feature keys after serialization.
+The inner feature.
 
 <h3 id="shape"><code>shape</code></h3>
 
 Return the shape (or dict of shape) of this FeatureConnector.
 
-
-
 ## Methods
+
+<h3 id="__getitem__"><code>__getitem__</code></h3>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/sequence_feature.py">View
+source</a>
+
+```python
+__getitem__(key)
+```
+
+Convenience method to access the underlying features.
+
+<h3 id="decode_batch_example"><code>decode_batch_example</code></h3>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/feature.py">View
+source</a>
+
+```python
+decode_batch_example(tfexample_data)
+```
+
+Decode multiple features batched in a single tf.Tensor.
+
+This function is used to decode features wrapped in
+<a href="../../tfds/features/Sequence.md"><code>tfds.features.Sequence()</code></a>.
+By default, this function apply `decode_example` on each individual elements
+using `tf.map_fn`. However, for optimization, features can overwrite this method
+to apply a custom batch decoding.
+
+#### Args:
+
+*   <b>`tfexample_data`</b>: Same `tf.Tensor` inputs as `decode_example`, but
+    with and additional first dimension for the sequence length.
+
+#### Returns:
+
+*   <b>`tensor_data`</b>: Tensor or dictionary of tensor, output of the
+    tf.data.Dataset object
 
 <h3 id="decode_example"><code>decode_example</code></h3>
 
-``` python
-decode_example(tfexample_data)
+```python
+decode_example(
+    *args,
+    **kwargs
+)
 ```
 
-See base class for details.
+Decode the serialize examples.
+
+#### Args:
+
+*   <b>`serialized_example`</b>: Nested `dict` of `tf.Tensor`
+*   <b>`decoders`</b>: Nested dict of `Decoder` objects which allow to customize
+    the decoding. The structure should match the feature structure, but only
+    customized feature keys need to be present. See
+    [the guide](https://github.com/tensorflow/datasets/tree/master/docs/decode.md)
+    for more info.
+
+#### Returns:
+
+*   <b>`example`</b>: Nested `dict` containing the decoded nested examples.
+
+<h3 id="decode_ragged_example"><code>decode_ragged_example</code></h3>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/feature.py">View
+source</a>
+
+```python
+decode_ragged_example(tfexample_data)
+```
+
+Decode nested features from a tf.RaggedTensor.
+
+This function is used to decode features wrapped in nested
+<a href="../../tfds/features/Sequence.md"><code>tfds.features.Sequence()</code></a>.
+By default, this function apply `decode_batch_example` on the flat values of the
+ragged tensor. For optimization, features can overwrite this method to apply a
+custom batch decoding.
+
+#### Args:
+
+*   <b>`tfexample_data`</b>: `tf.RaggedTensor` inputs containing the nested
+    encoded examples.
+
+#### Returns:
+
+*   <b>`tensor_data`</b>: The decoded `tf.RaggedTensor` or dictionary of tensor,
+    output of the tf.data.Dataset object
 
 <h3 id="encode_example"><code>encode_example</code></h3>
 
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/video_feature.py">View
+source</a>
+
 ``` python
-encode_example(example_data)
+encode_example(video_or_path_or_fobj)
 ```
 
-See base class for details.
+Converts the given image into a dict convertible to tf example.
 
 <h3 id="get_serialized_info"><code>get_serialized_info</code></h3>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/sequence_feature.py">View
+source</a>
 
 ``` python
 get_serialized_info()
 ```
 
-Return the tf-example features for the adapter, as stored on disk.
-
-This function indicates how this feature is encoded on file internally.
-The DatasetBuilder are written on disk as tf.train.Example proto.
-
-Ex:
-
-```
-return {
-    'image': tf.VarLenFeature(tf.uint8):
-    'height': tf.FixedLenFeature((), tf.int32),
-    'width': tf.FixedLenFeature((), tf.int32),
-}
-```
-
-FeatureConnector which are not containers should return the feature proto
-directly:
-
-```
-return tf.FixedLenFeature((64, 64), tf.uint8)
-```
-
-If not defined, the retuned values are automatically deduced from the
-`get_tensor_info` function.
-
-#### Returns:
-
-* <b>`features`</b>: Either a dict of feature proto object, or a feature proto object
+See base class for details.
 
 <h3 id="get_tensor_info"><code>get_tensor_info</code></h3>
+
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/sequence_feature.py">View
+source</a>
 
 ``` python
 get_tensor_info()
@@ -141,57 +259,28 @@ See base class for details.
 
 <h3 id="load_metadata"><code>load_metadata</code></h3>
 
-``` python
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/sequence_feature.py">View
+source</a>
+
+```python
 load_metadata(
-    data_dir,
-    feature_name
+    *args,
+    **kwargs
 )
 ```
 
-Restore the feature metadata from disk.
-
-If a dataset is re-loaded and generated files exists on disk, this function
-will restore the feature metadata from the saved file.
-
-#### Args:
-
-* <b>`data_dir`</b>: `str`, path to the dataset folder to which save the info (ex:
-    `~/datasets/cifar10/1.2.0/`)
-* <b>`feature_name`</b>: `str`, the name of the feature (from the FeatureDict key)
+See base class for details.
 
 <h3 id="save_metadata"><code>save_metadata</code></h3>
 
-``` python
+<a target="_blank" href="https://github.com/tensorflow/datasets/tree/master/tensorflow_datasets/core/features/sequence_feature.py">View
+source</a>
+
+```python
 save_metadata(
-    data_dir,
-    feature_name
+    *args,
+    **kwargs
 )
 ```
 
-Save the feature metadata on disk.
-
-This function is called after the data has been generated (by
-`_download_and_prepare`) to save the feature connector info with the
-generated dataset.
-
-Some dataset/features dynamically compute info during
-`_download_and_prepare`. For instance:
-
- * Labels are loaded from the downloaded data
- * Vocabulary is created from the downloaded data
- * ImageLabelFolder compute the image dtypes/shape from the manual_dir
-
-After the info have been added to the feature, this function allow to
-save those additional info to be restored the next time the data is loaded.
-
-By default, this function do not save anything, but sub-classes can
-overwrite the function.
-
-#### Args:
-
-* <b>`data_dir`</b>: `str`, path to the dataset folder to which save the info (ex:
-    `~/datasets/cifar10/1.2.0/`)
-* <b>`feature_name`</b>: `str`, the name of the feature (from the FeatureDict key)
-
-
-
+See base class for details.

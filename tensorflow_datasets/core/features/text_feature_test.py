@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,50 +21,62 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+from tensorflow_datasets import testing
 from tensorflow_datasets.core import features
-from tensorflow_datasets.core import test_utils
 from tensorflow_datasets.core.features.text import text_encoder
 
+tf.compat.v1.enable_eager_execution()
 
-class TextFeatureTest(test_utils.FeatureExpectationsTestCase):
 
-  @property
-  def expectations(self):
+class TextFeatureTest(testing.FeatureExpectationsTestCase):
+
+  def test_text(self):
     nonunicode_text = 'hello world'
     unicode_text = u'你好'
-    return [
-        test_utils.FeatureExpectation(
-            name='text',
-            feature=features.Text(),
-            shape=(),
-            dtype=tf.string,
-            tests=[
-                # Non-unicode
-                test_utils.FeatureExpectationItem(
-                    value=nonunicode_text,
-                    expected=tf.compat.as_bytes(nonunicode_text),
-                ),
-                # Unicode
-                test_utils.FeatureExpectationItem(
-                    value=unicode_text,
-                    expected=tf.compat.as_bytes(unicode_text),
-                ),
-            ],
-        ),
-        # Unicode integer-encoded by byte
-        test_utils.FeatureExpectation(
-            name='text_unicode_encoded',
-            feature=features.Text(encoder=text_encoder.ByteTextEncoder()),
-            shape=(None,),
-            dtype=tf.int64,
-            tests=[
-                test_utils.FeatureExpectationItem(
-                    value=unicode_text,
-                    expected=[i + 1 for i in [228, 189, 160, 229, 165, 189]],
-                ),
-            ],
-        ),
-    ]
+
+    self.assertFeature(
+        feature=features.Text(),
+        shape=(),
+        dtype=tf.string,
+        tests=[
+            # Non-unicode
+            testing.FeatureExpectationItem(
+                value=nonunicode_text,
+                expected=tf.compat.as_bytes(nonunicode_text),
+            ),
+            # Unicode
+            testing.FeatureExpectationItem(
+                value=unicode_text,
+                expected=tf.compat.as_bytes(unicode_text),
+            ),
+            # Empty string
+            testing.FeatureExpectationItem(
+                value='',
+                expected=tf.compat.as_bytes(''),
+            ),
+        ],
+    )
+
+  def test_text_encoded(self):
+    unicode_text = u'你好'
+
+    # Unicode integer-encoded by byte
+    self.assertFeature(
+        feature=features.Text(encoder=text_encoder.ByteTextEncoder()),
+        shape=(None,),
+        dtype=tf.int64,
+        tests=[
+            testing.FeatureExpectationItem(
+                value=unicode_text,
+                expected=[i + 1 for i in [228, 189, 160, 229, 165, 189]],
+            ),
+            # Empty string
+            testing.FeatureExpectationItem(
+                value='',
+                expected=[],
+            ),
+        ],
+    )
 
   def test_text_conversion(self):
     text_f = features.Text(encoder=text_encoder.ByteTextEncoder())
@@ -78,7 +90,7 @@ class TextFeatureTest(test_utils.FeatureExpectationsTestCase):
     ids = text_f.str2ints(text)
     self.assertEqual(1, ids[0])
 
-    with test_utils.tmp_dir(self.get_temp_dir()) as data_dir:
+    with testing.tmp_dir(self.get_temp_dir()) as data_dir:
       feature_name = 'dummy'
       text_f.save_metadata(data_dir, feature_name)
 
@@ -88,4 +100,4 @@ class TextFeatureTest(test_utils.FeatureExpectationsTestCase):
 
 
 if __name__ == '__main__':
-  tf.test.main()
+  testing.test_main()

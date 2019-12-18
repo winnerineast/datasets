@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 """Util import."""
 
 # pylint: disable=wildcard-import
+from tensorflow_datasets.core.utils.image_utils import *
 from tensorflow_datasets.core.utils.py_utils import *
 from tensorflow_datasets.core.utils.tf_utils import *
+from tensorflow_datasets.core.utils.tqdm_utils import *
+from tensorflow_datasets.core.utils.version import Experiment
 from tensorflow_datasets.core.utils.version import Version
 # pylint: enable=wildcard-import

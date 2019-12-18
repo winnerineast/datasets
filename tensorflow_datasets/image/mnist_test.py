@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,17 +19,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from tensorflow_datasets import testing
 from tensorflow_datasets.image import mnist
-from tensorflow_datasets.testing import dataset_builder_testing
 
 
 # testing/mnist.py generates fake input data
 
-mnist._TRAIN_EXAMPLES = 10
-mnist._TEST_EXAMPLES = 2
+mnist._TRAIN_EXAMPLES = 10  # pylint: disable=protected-access
+mnist._TEST_EXAMPLES = 2  # pylint: disable=protected-access
 
 
-class MNISTTest(dataset_builder_testing.TestCase):
+class MNISTTest(testing.DatasetBuilderTestCase):
   DATASET_CLASS = mnist.MNIST
   SPLITS = {
       "train": 10,
@@ -43,9 +43,49 @@ class MNISTTest(dataset_builder_testing.TestCase):
   }
 
 
+class MNISTTestS3(MNISTTest):
+  VERSION = "experimental_latest"
+
+
 class FashionMNISTTest(MNISTTest):
   DATASET_CLASS = mnist.FashionMNIST
 
 
+class FashionMNISTTestS3(FashionMNISTTest):
+  VERSION = "experimental_latest"
+
+
+class KMNISTTest(MNISTTest):
+  DATASET_CLASS = mnist.KMNIST
+
+
+class KMNISTTestS3(KMNISTTest):
+  VERSION = "experimental_latest"
+
+
+mnist.EMNIST.BUILDER_CONFIGS.extend([
+    mnist.EMNISTConfig(
+        name="test",
+        class_number=200,
+        train_examples=10,
+        test_examples=2,
+        description="EMNIST test data config.",
+    ),
+])
+
+
+class EMNISTTest(testing.DatasetBuilderTestCase):
+  DATASET_CLASS = mnist.EMNIST
+  SPLITS = {
+      "train": 10,
+      "test": 2,
+  }
+  BUILDER_CONFIG_NAMES_TO_TEST = ["test"]
+
+
+class EMNISTTestS3(EMNISTTest):
+  VERSION = "experimental_latest"
+
+
 if __name__ == "__main__":
-  dataset_builder_testing.main()
+  testing.test_main()

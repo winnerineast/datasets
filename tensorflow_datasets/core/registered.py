@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,12 +21,20 @@ from __future__ import print_function
 
 import abc
 import inspect
+import re
 
+from absl import flags
+from absl import logging
 import tensorflow as tf
 
 from tensorflow_datasets.core import api_utils
 from tensorflow_datasets.core import constants
 from tensorflow_datasets.core import naming
+from tensorflow_datasets.core.utils import gcs_utils
+from tensorflow_datasets.core.utils import py_utils
+
+
+FLAGS = flags.FLAGS
 
 __all__ = [
     "RegisteredDataset",
@@ -42,19 +50,37 @@ _DATASET_REGISTRY = {}
 # <str snake_cased_name, abstract DatasetBuilder subclass>
 _ABSTRACT_DATASET_REGISTRY = {}
 
+# Datasets that are under active development and which we can't therefore load.
+# <str snake_cased_name, in development DatasetBuilder subclass>
+_IN_DEVELOPMENT_REGISTRY = {}
+
+
 _NAME_STR_ERR = """\
-Parsing builder name string failed.
-The builder name string must be in one of the following formats:
-  * "dataset_name"
-  * "dataset_name/config_name"
-  * "dataset_name/kwarg1=val1,kwarg2=val2"
-  * "dataset_name/config_name/kwarg1=val1,kwarg2=val2"
+Parsing builder name string {} failed.
+The builder name string must be of the following format:
+  dataset_name[/config_name][:version][/kwargs]
+
+  Where:
+
+    * dataset_name and config_name are string following python variable naming.
+    * version is of the form x.y.z where {{x,y,z}} can be any digit or *.
+    * kwargs is a comma list separated of arguments and values to pass to
+      builder.
+
+  Examples:
+    my_dataset
+    my_dataset:1.2.*
+    my_dataset/config1
+    my_dataset/config1:1.*.*
+    my_dataset/config1/arg1=val1,arg2=val2
+    my_dataset/config1:1.2.3/right=True,foo=bar,rate=1.2
 """
 
 _DATASET_NOT_FOUND_ERR = """\
 Check that:
     - the dataset name is spelled correctly
     - dataset class defines all base class abstract methods
+    - dataset class is not in development, i.e. if IN_DEVELOPMENT=True
     - the module defining the dataset class is imported
 """
 
@@ -62,12 +88,15 @@ Check that:
 class DatasetNotFoundError(ValueError):
   """The requested Dataset was not found."""
 
-  def __init__(self, name, is_abstract=False):
+  def __init__(self, name, is_abstract=False, in_development=False):
     all_datasets_str = "\n\t- ".join([""] + list_builders())
     if is_abstract:
-      error_string = ("Dataset %s not found. "
-                      "Requesting the builder for an abstract class\n"
+      error_string = ("Dataset %s is an abstract class so cannot be created. "
+                      "Please make sure to instantiate all abstract methods.\n"
                       "%s") % (name, _DATASET_NOT_FOUND_ERR)
+    elif in_development:
+      error_string = ("Dataset %s is under active development and is not "
+                      "available yet.\n") % name
     else:
       error_string = ("Dataset %s not found. Available datasets:%s\n"
                       "%s") % (name, all_datasets_str, _DATASET_NOT_FOUND_ERR)
@@ -83,13 +112,21 @@ class RegisteredDataset(abc.ABCMeta):
     cls = super(RegisteredDataset, mcs).__new__(
         mcs, cls_name, bases, class_dict)
 
-    if name in _DATASET_REGISTRY:
+    if py_utils.is_notebook():  # On Colab/Jupyter, we allow overwriting
+      pass
+    elif name in _DATASET_REGISTRY:
       raise ValueError("Dataset with name %s already registered." % name)
-    if name in _ABSTRACT_DATASET_REGISTRY:
+    elif name in _IN_DEVELOPMENT_REGISTRY:
+      raise ValueError(
+          "Dataset with name %s already registered as in development." % name)
+    elif name in _ABSTRACT_DATASET_REGISTRY:
       raise ValueError(
           "Dataset with name %s already registered as abstract." % name)
+
     if inspect.isabstract(cls):
       _ABSTRACT_DATASET_REGISTRY[name] = cls
+    elif class_dict.get("IN_DEVELOPMENT"):
+      _IN_DEVELOPMENT_REGISTRY[name] = cls
     else:
       _DATASET_REGISTRY[name] = cls
     return cls
@@ -100,7 +137,7 @@ def list_builders():
   return sorted(list(_DATASET_REGISTRY))
 
 
-def builder(name, **ctor_kwargs):
+def builder(name, **builder_init_kwargs):
   """Fetches a `tfds.core.DatasetBuilder` by string name.
 
   Args:
@@ -113,37 +150,52 @@ def builder(name, **ctor_kwargs):
       (for builders with configs, it would be `"foo_bar/zoo/a=True,b=3"` to
       use the `"zoo"` config and pass to the builder keyword arguments `a=True`
       and `b=3`).
-    **ctor_kwargs: `dict` of keyword arguments passed to the `DatasetBuilder`.
-      These will override keyword arguments passed in `name`, if any.
+    **builder_init_kwargs: `dict` of keyword arguments passed to the
+      `DatasetBuilder`. These will override keyword arguments passed in `name`,
+      if any.
 
   Returns:
     A `tfds.core.DatasetBuilder`.
 
   Raises:
-    ValueError: if `name` is unrecognized.
+    DatasetNotFoundError: if `name` is unrecognized.
   """
   name, builder_kwargs = _dataset_name_and_kwargs_from_name_str(name)
-  builder_kwargs.update(ctor_kwargs)
+  builder_kwargs.update(builder_init_kwargs)
   if name in _ABSTRACT_DATASET_REGISTRY:
     raise DatasetNotFoundError(name, is_abstract=True)
+  if name in _IN_DEVELOPMENT_REGISTRY:
+    raise DatasetNotFoundError(name, in_development=True)
   if name not in _DATASET_REGISTRY:
-    raise DatasetNotFoundError(name, is_abstract=False)
-  return _DATASET_REGISTRY[name](**builder_kwargs)
+    raise DatasetNotFoundError(name)
+  try:
+    return _DATASET_REGISTRY[name](**builder_kwargs)
+  except BaseException:
+    logging.error("Failed to construct dataset %s", name)
+    raise
 
 
 @api_utils.disallow_positional_args(allowed=["name"])
 def load(name,
-         split,
+         split=None,
          data_dir=None,
-         batch_size=1,
+         batch_size=None,
+         in_memory=None,
+         shuffle_files=False,
          download=True,
-         as_numpy=False,
          as_supervised=False,
+         decoders=None,
+         read_config=None,
          with_info=False,
          builder_kwargs=None,
          download_and_prepare_kwargs=None,
-         as_dataset_kwargs=None):
-  """Loads the given `tfds.Split` as a `tf.data.Dataset`.
+         as_dataset_kwargs=None,
+         try_gcs=False):
+  # pylint: disable=line-too-long
+  """Loads the named dataset into a `tf.data.Dataset`.
+
+  If `split=None` (the default), returns all splits for the dataset. Otherwise,
+  returns the specified split.
 
   `load` is a convenience method that fetches the `tfds.core.DatasetBuilder` by
   string name, optionally calls `DatasetBuilder.download_and_prepare`
@@ -161,10 +213,13 @@ def load(name,
   return ds
   ```
 
+  If you'd like NumPy arrays instead of `tf.data.Dataset`s or `tf.Tensor`s,
+  you can pass the return value to `tfds.as_numpy`.
+
   Callers must pass arguments as keyword arguments.
 
   **Warning**: calling this function might potentially trigger the download
-  of hundreds of GiB to disk. Refer to download argument.
+  of hundreds of GiB to disk. Refer to the `download` argument.
 
   Args:
     name: `str`, the registered name of the `DatasetBuilder` (the snake case
@@ -176,25 +231,37 @@ def load(name,
       (for builders with configs, it would be `"foo_bar/zoo/a=True,b=3"` to
       use the `"zoo"` config and pass to the builder keyword arguments `a=True`
       and `b=3`).
-    split: `tfds.Split`, which split of the data to load.
+    split: `tfds.Split` or `str`, which split of the data to load. If None,
+      will return a `dict` with all splits (typically `tfds.Split.TRAIN` and
+      `tfds.Split.TEST`).
     data_dir: `str` (optional), directory to read/write data.
       Defaults to "~/tensorflow_datasets".
-    batch_size: `int`, set to > 1 to get batches of examples. Note that
-      variable length features will be 0-padded. If `as_numpy=True` and
-      `batch_size=-1`, will return the full dataset in NumPy arrays.
+    batch_size: `int`, if set, add a batch dimension to examples. Note that
+      variable length features will be 0-padded. If
+      `batch_size=-1`, will return the full dataset as `tf.Tensor`s.
+    in_memory: `bool`, if `True`, loads the dataset in memory which
+      increases iteration speeds. Note that if `True` and the dataset has
+      unknown dimensions, the features will be padded to the maximum
+      size across the dataset.
+    shuffle_files: `bool`, whether to shuffle the input files.
+      Defaults to `False`.
     download: `bool` (optional), whether to call
       `tfds.core.DatasetBuilder.download_and_prepare`
       before calling `tf.DatasetBuilder.as_dataset`. If `False`, data is
       expected to be in `data_dir`. If `True` and the data is already in
       `data_dir`, `download_and_prepare` is a no-op.
-      Defaults to `True`.
-    as_numpy: `bool`, whether to return a generator of NumPy array batches
-      using `tfds.core.DatasetBuilder.as_numpy`.
     as_supervised: `bool`, if `True`, the returned `tf.data.Dataset`
       will have a 2-tuple structure `(input, label)` according to
       `builder.info.supervised_keys`. If `False`, the default,
       the returned `tf.data.Dataset` will have a dictionary with all the
       features.
+    decoders: Nested dict of `Decoder` objects which allow to customize the
+      decoding. The structure should match the feature structure, but only
+      customized feature keys need to be present. See
+      [the guide](https://github.com/tensorflow/datasets/tree/master/docs/decode.md)
+      for more info.
+    read_config: `tfds.ReadConfig`, Additional options to configure the
+      input pipeline (e.g. seed, num parallel reads,...).
     with_info: `bool`, if True, tfds.load will return the tuple
       (tf.data.Dataset, tfds.core.DatasetInfo) containing the info associated
       with the builder.
@@ -206,18 +273,32 @@ def load(name,
       to control where to download and extract the cached data. If not set,
       cache_dir and manual_dir will automatically be deduced from data_dir.
     as_dataset_kwargs: `dict` (optional), keyword arguments passed to
-      `tfds.core.DatasetBuilder.as_dataset`. `split` will be passed through by
-      default.
+      `tfds.core.DatasetBuilder.as_dataset`.
+    try_gcs: `bool`, if True, tfds.load will see if the dataset exists on
+      the public GCS bucket before building it locally.
 
   Returns:
-    ds: `tf.data.Dataset`, the dataset requested.
-    ds_info: `tfds.core.DatasetInfo`, if `with_info` is True, then tfds.load
-      will return a tuple (ds, ds_info) containing the dataset info (version,
-      features, splits, num_examples,...).
+    ds: `tf.data.Dataset`, the dataset requested, or if `split` is None, a
+      `dict<key: tfds.Split, value: tfds.data.Dataset>`. If `batch_size=-1`,
+      these will be full datasets as `tf.Tensor`s.
+    ds_info: `tfds.core.DatasetInfo`, if `with_info` is True, then `tfds.load`
+      will return a tuple `(ds, ds_info)` containing dataset information
+      (version, features, splits, num_examples,...). Note that the `ds_info`
+      object documents the entire dataset, regardless of the `split` requested.
+      Split-specific information is available in `ds_info.splits`.
   """
-  if data_dir is None:
+  # pylint: enable=line-too-long
+
+  name, name_builder_kwargs = _dataset_name_and_kwargs_from_name_str(name)
+  name_builder_kwargs.update(builder_kwargs or {})
+  builder_kwargs = name_builder_kwargs
+
+  # Set data_dir
+  if try_gcs and gcs_utils.is_dataset_on_gcs(name):
+    data_dir = constants.GCS_DATA_DIR
+  elif data_dir is None:
     data_dir = constants.DATA_DIR
-  builder_kwargs = builder_kwargs or {}
+
   dbuilder = builder(name, data_dir=data_dir, **builder_kwargs)
   if download:
     download_and_prepare_kwargs = download_and_prepare_kwargs or {}
@@ -226,55 +307,49 @@ def load(name,
   if as_dataset_kwargs is None:
     as_dataset_kwargs = {}
   as_dataset_kwargs = dict(as_dataset_kwargs)
-  as_dataset_kwargs["split"] = split
-  as_dataset_kwargs["as_supervised"] = as_supervised
-  as_dataset_kwargs["batch_size"] = batch_size
+  as_dataset_kwargs.setdefault("split", split)
+  as_dataset_kwargs.setdefault("as_supervised", as_supervised)
+  as_dataset_kwargs.setdefault("batch_size", batch_size)
+  as_dataset_kwargs.setdefault("decoders", decoders)
+  as_dataset_kwargs.setdefault("in_memory", in_memory)
+  as_dataset_kwargs.setdefault("shuffle_files", shuffle_files)
+  as_dataset_kwargs.setdefault("read_config", read_config)
 
-  if as_numpy:
-    ds = dbuilder.as_numpy(**as_dataset_kwargs)
-  else:
-    ds = dbuilder.as_dataset(**as_dataset_kwargs)
+  ds = dbuilder.as_dataset(**as_dataset_kwargs)
   if with_info:
     return ds, dbuilder.info
   return ds
 
 
+_VERSION_RE = r""
+
+_NAME_REG = re.compile(
+    r"^"
+    r"(?P<dataset_name>\w+)"
+    r"(/(?P<config>[\w\-\.]+))?"
+    r"(:(?P<version>(\d+|\*)(\.(\d+|\*)){2}))?"
+    r"(/(?P<kwargs>(\w+=\w+)(,\w+=[^,]+)*))?"
+    r"$")
+
+
 def _dataset_name_and_kwargs_from_name_str(name_str):
   """Extract kwargs from name str."""
-  num_slashes = name_str.count("/")
-  has_kwargs = "," in name_str or "=" in name_str
-
+  res = _NAME_REG.match(name_str)
+  if not res:
+    raise ValueError(_NAME_STR_ERR.format(name_str))
+  name = res.group("dataset_name")
+  kwargs = _kwargs_str_to_kwargs(res.group("kwargs"))
   try:
-    if not num_slashes:
-      # 1. dataset_name
-      if has_kwargs:
-        raise ValueError(_NAME_STR_ERR)
-      return name_str, {}
-
-    name_splits = name_str.split("/")
-    if has_kwargs:
-      if num_slashes == 1:
-        # 2. dataset_name/kwargs
-        dataset_name, kwargs_str = name_splits
-        config = None
-      else:
-        if num_slashes > 2:
-          raise ValueError(_NAME_STR_ERR)
-        assert num_slashes == 2
-        # 3. dataset_name/config_name/kwargs
-        dataset_name, config, kwargs_str = name_splits
-    else:
-      # 4. dataset_name/config_name
-      dataset_name, config = name_splits
-      kwargs_str = ""
-
-    kwargs = _kwargs_str_to_kwargs(kwargs_str)
-    if "config" in kwargs and config:
-      raise ValueError("Cannot pass config twice. Got %s" % name_str)
-    kwargs["config"] = config
-    return dataset_name, kwargs
+    for attr in ["config", "version"]:
+      val = res.group(attr)
+      if val is None:
+        continue
+      if attr in kwargs:
+        raise ValueError("Dataset %s: cannot pass %s twice." % (name, attr))
+      kwargs[attr] = val
+    return name, kwargs
   except:
-    tf.logging.error(_NAME_STR_ERR)
+    logging.error(_NAME_STR_ERR.format(name_str))   # pylint: disable=logging-format-interpolation
     raise
 
 

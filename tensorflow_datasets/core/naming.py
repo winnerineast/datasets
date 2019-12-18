@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,6 +30,11 @@ def camelcase_to_snakecase(name):
   """Convert camel-case string to snake-case."""
   s1 = _first_cap_re.sub(r"\1_\2", name)
   return _all_cap_re.sub(r"\1_\2", s1).lower()
+
+
+def snake_to_camelcase(name):
+  """Convert snake-case string to camel-case string."""
+  return "".join(n.capitalize() for n in name.split("_"))
 
 
 def filename_prefix_for_name(name):

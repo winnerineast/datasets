@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,11 +21,8 @@ from __future__ import print_function
 
 import collections
 import os
-import random
 
 import numpy as np
-import six
-from six.moves import cPickle
 import tensorflow as tf
 import tensorflow_datasets.public_api as tfds
 
@@ -47,7 +44,12 @@ _CITATION = """\
 class Cifar10(tfds.core.GeneratorBasedBuilder):
   """CIFAR-10."""
 
-  VERSION = tfds.core.Version("1.0.1")
+  VERSION = tfds.core.Version("1.0.2",
+                              experiments={tfds.core.Experiment.S3: False})
+  SUPPORTED_VERSIONS = [
+      tfds.core.Version(
+          "3.0.0", "New split API (https://tensorflow.org/datasets/splits)"),
+  ]
 
   def _info(self):
     return tfds.core.DatasetInfo(
@@ -60,9 +62,7 @@ class Cifar10(tfds.core.GeneratorBasedBuilder):
             "label": tfds.features.ClassLabel(num_classes=10),
         }),
         supervised_keys=("image", "label"),
-        urls=["https://www.cs.toronto.edu/~kriz/cifar.html"],
-        download_checksums=tfds.download.load_checksums(self.name),
-        size_in_bytes=162.6 * tfds.units.MiB,
+        homepage="https://www.cs.toronto.edu/~kriz/cifar.html",
         citation=_CITATION,
     )
 
@@ -70,35 +70,31 @@ class Cifar10(tfds.core.GeneratorBasedBuilder):
   def _cifar_info(self):
     return CifarInfo(
         name=self.name,
-        url="https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz",
+        url="https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz",
         train_files=[
-            "data_batch_1", "data_batch_2", "data_batch_3", "data_batch_4",
-            "data_batch_5"
+            "data_batch_1.bin", "data_batch_2.bin", "data_batch_3.bin",
+            "data_batch_4.bin", "data_batch_5.bin"
         ],
-        test_files=["test_batch"],
-        meta_file="batches.meta",
-        prefix="cifar-10-batches-py/",
-        label_keys=["labels"],
+        test_files=["test_batch.bin"],
+        prefix="cifar-10-batches-bin/",
+        label_files=["batches.meta.txt"],
+        label_keys=["label"],
     )
 
   def _split_generators(self, dl_manager):
+    """Returns SplitGenerators."""
     cifar_path = dl_manager.download_and_extract(self._cifar_info.url)
     cifar_info = self._cifar_info
 
     cifar_path = os.path.join(cifar_path, cifar_info.prefix)
 
     # Load the label names
-    metadata = _load_pickle(os.path.join(cifar_path, cifar_info.meta_file))
-    for label_key in cifar_info.label_keys:
-      label_key = _strip_s(label_key)  # labels => label
-      label_names = metadata["{}_names".format(label_key)]
-
-      # Multi label case
-      if len(cifar_info.label_keys) > 1:
-        self.info.features[label_key].names = label_names
-      # Single label
-      else:
-        self.info.features["label"].names = label_names
+    for label_key, label_file in zip(cifar_info.label_keys,
+                                     cifar_info.label_files):
+      labels_path = os.path.join(cifar_path, label_file)
+      with tf.io.gfile.GFile(labels_path) as label_f:
+        label_names = [name for name in label_f.read().split("\n") if name]
+      self.info.features[label_key].names = label_names
 
     # Define the splits
     def gen_filenames(filenames):
@@ -108,11 +104,11 @@ class Cifar10(tfds.core.GeneratorBasedBuilder):
     return [
         tfds.core.SplitGenerator(
             name=tfds.Split.TRAIN,
-            num_shards=10,
+            num_shards=10,  # Ignored when using a version with S3 experiment.
             gen_kwargs={"filepaths": gen_filenames(cifar_info.train_files)}),
         tfds.core.SplitGenerator(
             name=tfds.Split.TEST,
-            num_shards=1,
+            num_shards=1,  # Ignored when using a version with S3 experiment.
             gen_kwargs={"filepaths": gen_filenames(cifar_info.test_files)}),
     ]
 
@@ -128,77 +124,39 @@ class Cifar10(tfds.core.GeneratorBasedBuilder):
     Yields:
       The cifar examples, as defined in the dataset info features.
     """
-    images, labels = [], []
+    label_keys = self._cifar_info.label_keys
+    index = 0  # Using index as key since data is always loaded in same order.
     for path in filepaths:
-      data = _load_pickle(path)
-
-      batch_images = data["data"]
-      num_images = batch_images.shape[0]
-      batch_images = batch_images.reshape(
-          (num_images, 3, _CIFAR_IMAGE_SIZE, _CIFAR_IMAGE_SIZE))
-      # Get images into [height, width, channels] format
-      images.extend([
-          np.squeeze(batch_images[j]).transpose((1, 2, 0))
-          for j in range(num_images)
-      ])
-
-      # Extract the list[dict[label_key, example_label]]
-      labels.extend([
-          {_strip_s(k): data[k][j] for k in self._cifar_info.label_keys}
-          for j in range(num_images)
-      ])
-
-    # Shuffle the data to make sure classes are well distributed.
-    data = list(zip(images, labels))
-    random.shuffle(data)
-
-    for image, label in data:
-      if len(label) == 1:
-        label = label[_strip_s(self._cifar_info.label_keys[0])]
-        yield self.info.features.encode_example({
-            "image": image,
-            "label": label,
-        })
-      else:
-        features = {"image": image}
-        features.update(label)
-        yield self.info.features.encode_example(features)
+      for labels, np_image in _load_data(path, len(label_keys)):
+        record = dict(zip(label_keys, labels))
+        record["image"] = np_image
+        yield index, record
+        index += 1
 
 
 class Cifar100(Cifar10):
   """CIFAR-100 dataset."""
 
-  VERSION = tfds.core.Version("1.2.0")
-
-  def __init__(self, use_coarse_labels=False, **kwargs):
-    """Constructs Cifar-100 dataset.
-
-    Args:
-      use_coarse_labels (bool): whether to set the coarse labels or the fine
-        labels as the target feature if `as_supervised=True` in `as_dataset`.
-        Note that in either case, both features will be
-        present in the features dictionary as "fine_label" and "coarse_label".
-        Note also that this does NOT affect the data on disk and is only used in
-        the `tf.data.Dataset` input pipeline.
-      **kwargs: See DatasetBuilder.__init__.
-    """
-    self._use_coarse_labels = use_coarse_labels
-    super(Cifar100, self).__init__(**kwargs)
+  VERSION = tfds.core.Version("1.3.1",
+                              experiments={tfds.core.Experiment.S3: False})
+  SUPPORTED_VERSIONS = [
+      tfds.core.Version(
+          "3.0.0", "New split API (https://tensorflow.org/datasets/splits)"),
+  ]
 
   @property
   def _cifar_info(self):
     return CifarInfo(
         name=self.name,
-        url="https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz",
-        train_files=["train"],
-        test_files=["test"],
-        meta_file="meta",
-        prefix="cifar-100-python/",
-        label_keys=["fine_labels", "coarse_labels"],
+        url="https://www.cs.toronto.edu/~kriz/cifar-100-binary.tar.gz",
+        train_files=["train.bin"],
+        test_files=["test.bin"],
+        prefix="cifar-100-binary/",
+        label_files=["coarse_label_names.txt", "fine_label_names.txt"],
+        label_keys=["coarse_label", "label"],
     )
 
   def _info(self):
-    label_to_use = "coarse_label" if self._use_coarse_labels else "fine_label"
     return tfds.core.DatasetInfo(
         builder=self,
         description=("This dataset is just like the CIFAR-10, except it has "
@@ -210,13 +168,11 @@ class Cifar100(Cifar10):
                      "(the superclass to which it belongs)."),
         features=tfds.features.FeaturesDict({
             "image": tfds.features.Image(shape=_CIFAR_IMAGE_SHAPE),
+            "label": tfds.features.ClassLabel(num_classes=100),
             "coarse_label": tfds.features.ClassLabel(num_classes=20),
-            "fine_label": tfds.features.ClassLabel(num_classes=100),
         }),
-        supervised_keys=("image", label_to_use),
-        urls=["https://www.cs.toronto.edu/~kriz/cifar.html"],
-        download_checksums=tfds.download.load_checksums(self.name),
-        size_in_bytes=161.2 * tfds.units.MiB,
+        supervised_keys=("image", "label"),
+        homepage="https://www.cs.toronto.edu/~kriz/cifar.html",
         citation=_CITATION,
     )
 
@@ -227,36 +183,37 @@ class CifarInfo(collections.namedtuple("_CifarInfo", [
     "prefix",
     "train_files",
     "test_files",
-    "meta_file",
+    "label_files",
     "label_keys",
 ])):
   """Contains the information necessary to generate a CIFAR dataset.
 
-  Args:
+  Attributes:
     name (str): name of dataset.
     url (str): data URL.
     prefix (str): path prefix within the downloaded and extracted file to look
       for `train_files` and `test_files`.
     train_files (list<str>): name of training files within `prefix`.
     test_files (list<str>): name of test files within `prefix`.
-    meta_file (str): name of metadata file (labels) within `prefix`.
-    label_keys (list<str>): names of the label keys in the data. If longer than
-      1, provide `out_label_keys` to specify output names in feature
-      dictionaries.  Otherwise will use "label".
+    label_files (list<str>): names of the label files in the data.
+    label_keys (list<str>): names of the label keys in the data.
   """
 
 
-def _load_pickle(path):
-  with tf.gfile.Open(path, "rb") as f:
-    if six.PY2:
-      data = cPickle.load(f)
-    else:
-      data = cPickle.load(f, encoding="latin1")
-  return data
-
-
-def _strip_s(s):
-  """Remove the 's': labels => label."""
-  if not s.endswith("s"):
-    raise AssertionError("{} should ends with 's'".format(s))
-  return s[:-1]
+def _load_data(path, labels_number=1):
+  """Yields (labels, np_image) tuples."""
+  with tf.io.gfile.GFile(path, "rb") as f:
+    data = f.read()
+  offset = 0
+  max_offset = len(data) - 1
+  while offset < max_offset:
+    labels = np.frombuffer(data, dtype=np.uint8, count=labels_number,
+                           offset=offset).reshape((labels_number,))
+    # 1 byte per label, 1024 * 3 = 3072 bytes for the image.
+    offset += labels_number
+    img = (np.frombuffer(data, dtype=np.uint8, count=3072, offset=offset)
+           .reshape((3, _CIFAR_IMAGE_SIZE, _CIFAR_IMAGE_SIZE))
+           .transpose((1, 2, 0))
+          )
+    offset += 3072
+    yield labels, img

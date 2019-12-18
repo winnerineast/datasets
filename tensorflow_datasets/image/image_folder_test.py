@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The TensorFlow Datasets Authors.
+# Copyright 2019 The TensorFlow Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,20 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for cifar dataset module."""
+"""Test for ImageLabelFolder."""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import functools
-
+from tensorflow_datasets import testing
 from tensorflow_datasets.core import registered
 from tensorflow_datasets.image import image_folder
-from tensorflow_datasets.testing import dataset_builder_testing
 
 
-class ImageLabelFolderTest(dataset_builder_testing.TestCase):
+class ImageLabelFolderTest(testing.DatasetBuilderTestCase):
+  """Test for ImageLabelFolder."""
   DATASET_CLASS = functools.partial(
       image_folder.ImageLabelFolder, dataset_name="image_folder_data")
   # The above construct forces us to disable those checks:
@@ -44,5 +44,9 @@ class ImageLabelFolderTest(dataset_builder_testing.TestCase):
                   "Dataset was not registered.")
 
 
+class ImageLabelFolderS3Test(ImageLabelFolderTest):
+  VERSION = "experimental_latest"
+
+
 if __name__ == "__main__":
-  dataset_builder_testing.main()
+  testing.test_main()
